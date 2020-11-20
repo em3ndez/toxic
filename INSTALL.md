@@ -59,6 +59,8 @@ Run `make doc` in the build directory after editing the asciidoc files to regene
   * `DISABLE_QRPNG` → Disable support for exporting QR as PNG
   * `DISABLE_DESKTOP_NOTIFY=1` → Disable desktop notifications support
   * `ENABLE_PYTHON=1` → Build toxic with Python scripting support
+  * `ENABLE_RELEASE=1` → Build toxic without debug symbols and full compiler optimizations
+  * `ENABLE_ASAN=1` → Build toxic with LLVM Address Sanitizer enabled [^1]
 
 * `DESTDIR=""` Specifies the base install directory for binaries and data files (e.g.: DESTDIR="/tmp/build/pkg")
 
@@ -66,3 +68,5 @@ Run `make doc` in the build directory after editing the asciidoc files to regene
 * You can use the `CFLAGS` and `LDFLAGS` environment variables to add specific flags to the Makefile
 * The `PREFIX` environment variable specifies a base install directory for binaries and data files. This is interchangeable with the `DESTDIR` variable, and is generally used by systems that have the `PREFIX` environment variable set by default.<br />
 **Note**: `sudo` does not preserve user environment variables by default on some systems. See the `sudoers` manual for more information.
+
+[^1]: If toxic fails to run with ASAN enabled on the release build due to odr-violation warnings, try the command `export ASAN_OPTIONS=use_odr_indicator=1`
