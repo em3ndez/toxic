@@ -1,0 +1,135 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  common:
+    uses: TokTok/ci-tools/.github/workflows/common-ci.yml@master
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
+        run:
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+            libalut-dev
+            libconfig-dev
+            libcurl4-gnutls-dev
+            libmsgpack-dev
+            libnotify-dev
+            libopenal-dev
+            libopus-dev
+            libqrencode-dev
+            libsodium-dev
+            libvpx-dev
+            libx11-dev
+            python3-dev
+            pkg-config &&
+          git clone --depth=1 --recursive https://github.com/TokTok/c-toxcore &&
+          cd c-toxcore &&
+          cmake . -B_build -DBOOTSTRAP_DAEMON=OFF -DEXPERIMENTAL_API=ON &&
+          cd _build &&
+          make -j4 &&
+          sudo make install
+
+      - name: Build toxic
+        run: USER_CFLAGS=-Werror make -j4 ENABLE_TOX_EXPERIMENTAL=1
+
+  build-static:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Build minimal static toxic binary
+        run: docker run --rm
+          -v /tmp/artifact:/artifact
+          -v $PWD:/toxic
+          amd64/alpine:latest
+          sh -c 'yes | /toxic/script/build-minimal-static-toxic.sh'
+      - name: Display binary checksum
+        run: |
+          tar Jxf /tmp/artifact/toxic-minimal-static-musl_linux_x86-64.tar.xz
+          sha256sum toxic-minimal-static-musl_linux_x86-64/toxic
+
+  infer:
+    runs-on: ubuntu-latest
+    container: toxchat/infer
+    steps:
+      - name: Install git
+        run:
+          apt-get update &&
+          DEBIAN_FRONTEND=noninteractive
+          apt-get install -y --no-install-recommends
+            git
+      - name: Install dependencies
+        run:
+          apt-get update &&
+          apt-get install -y --no-install-recommends
+            cmake
+            g++
+            libalut-dev
+            libconfig-dev
+            libcurl4-gnutls-dev
+            libmsgpack-dev
+            libncurses-dev
+            libnotify-dev
+            libopenal-dev
+            libopus-dev
+            libqrencode-dev
+            libsodium-dev
+            libvpx-dev
+            libx11-dev
+            make
+            python3-dev
+            pkg-config &&
+          git clone --depth=1 --recursive https://github.com/TokTok/c-toxcore &&
+          cd c-toxcore &&
+          cmake . -B_build -DBOOTSTRAP_DAEMON=OFF &&
+          cd _build &&
+          make -j4 &&
+          make install
+      - uses: actions/checkout@v6
+
+      - name: Run infer
+        run:
+          infer --no-progress-bar -- cc src/*.c
+            -fsyntax-only
+            $(python3-config --includes --ldflags)
+            $(pkg-config --cflags --libs
+              freealut
+              libconfig
+              libcurl
+              libnotify
+              libpng
+              libqrencode
+              msgpack
+              ncurses
+              openal
+              python3
+              toxcore
+              vpx
+              x11)
+            -DAUDIO
+            -DBOX_NOTIFY
+            -DGAMES
+            -DPACKAGE_DATADIR='"."'
+            -DPYTHON
+            -DQRCODE
+            -DSOUND_NOTIFY
+            -DVIDEO
+            -DENABLE_TOX_EXPERIMENTAL
+      - name: Print log
+        run:
+          cat /__w/toxic/toxic/infer-out/report.txt
+
+  integration-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Run integration tests
+        run: test/run

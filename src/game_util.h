@@ -1,29 +1,17 @@
 /*  game_util.h
  *
+ *  Copyright (C) 2020-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2020 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef GAME_UTIL
 #define GAME_UTIL
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <time.h>
 
 typedef struct Coords {
@@ -89,6 +77,18 @@ void game_util_move_coords(Direction direction, Coords *coords);
  * Returns a random colour.
  */
 int game_util_random_colour(void);
+
+/*
+ * Converts relative window coordinates to static game board coordinates
+ * and puts the result in `coords`.
+ */
+void game_util_win_coords_to_board(int win_x, int win_y, int x_left_bound, int y_top_bound, Coords *coords);
+
+/*
+ * Converts static game board coordinates to relative window coordinates
+ * and puts the result in `coords.
+ */
+void game_util_board_to_win_coords(int board_x, int board_y, int x_left_bound, int y_top_bound, Coords *coords);
 
 /*
  * Packs an unsigned 32 bit integer `v` into `bytes`.

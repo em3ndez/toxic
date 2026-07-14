@@ -1,13 +1,13 @@
 '\" t
 .\"     Title: toxic.conf
 .\"    Author: [see the "AUTHORS" section]
-.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 2021-05-24
+.\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
+.\"      Date: 2026-01-16
 .\"    Manual: Toxic Manual
 .\"    Source: toxic __VERSION__
 .\"  Language: English
 .\"
-.TH "TOXIC\&.CONF" "5" "2021\-05\-24" "toxic __VERSION__" "Toxic Manual"
+.TH "TOXIC\&.CONF" "5" "2026\-01\-16" "toxic __VERSION__" "Toxic Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -79,13 +79,18 @@ Time format string for the interface enclosed by double quotes\&. See
 .PP
 \fBlog_timestamp_format\fR
 .RS 4
-Time format string for logging enclosed by double quotes\&. See
+Time format string for logging enclosed by double quotes\&. (Note: the time portion of the format string must be enclosed by square brackets in order to be parsed by toxic)\&. See
 \fBdate\fR(1)
 .RE
 .PP
 \fBalerts\fR
 .RS 4
 Enable or disable acoustic alerts on events\&. true or false
+.RE
+.PP
+\fBshow_notification_content\fR
+.RS 4
+Show the content of desktop notifications\&. true or false
 .RE
 .PP
 \fBnative_colors\fR
@@ -95,22 +100,22 @@ Select between native terminal colors and toxic color theme\&. true or false
 .PP
 \fBcolor_bar_bg\fR
 .RS 4
-set background color of chat status bars\&. (black, white, red, green, blue, cyan, yellow, magenta)
+set background color of chat status bars\&. (black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink)
 .RE
 .PP
 \fBcolor_bar_fg\fR
 .RS 4
-set foreground (text) color of chat status bars\&. (black, white, red, green, blue, cyan, yellow, magenta)
+set foreground (text) color of chat status bars\&. (black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink)
 .RE
 .PP
 \fBcolor_bar_accent\fR
 .RS 4
-set foreground accent color of chat status bars\&. (black, white, red, green, blue, cyan, yellow, magenta)
+set foreground accent color of chat status bars\&. (black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink)
 .RE
 .PP
 \fBcolor_bar_notify\fR
 .RS 4
-set foreground notify (and typing) color in chat status bar\&. (black, white, red, green, blue, cyan, yellow, magenta)
+set foreground notify (and typing) color in chat status bar\&. (black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink)
 .RE
 .PP
 \fBautolog\fR
@@ -136,6 +141,16 @@ Show welcome message on startup\&. true or false
 \fBshow_connection_msg\fR
 .RS 4
 Enable friend connection change notifications\&. true or false
+.RE
+.PP
+\fBshow_group_connection_msg\fR
+.RS 4
+Enable group connection change notifications\&. true or false
+.RE
+.PP
+\fBshow_network_info\fR
+.RS 4
+Show network information in the UI home window\&. true or false (only available if toxic is compiled with experimental features enabled)
 .RE
 .PP
 \fBnodelist_update_freq\fR
@@ -178,6 +193,11 @@ Indicator for alert messages\&.
 Indicator for normal messages\&.
 .RE
 .PP
+\fBline_padding\fR
+.RS 4
+Pad every wrapped line of a message with enough spaces to align it to the beginning of the first line\&. true or false
+.RE
+.PP
 \fBmplex_away\fR
 .RS 4
 Set user status when attaching and detaching from GNU screen or tmux\&. true or false
@@ -186,6 +206,11 @@ Set user status when attaching and detaching from GNU screen or tmux\&. true or 
 \fBmplex_away_note\fR
 .RS 4
 Status message to set when status is set to away due to screen/tmux detach\&. When attaching, the status message is set back to the original value\&.
+.RE
+.PP
+\fBgroup_part_message\fR
+.RS 4
+Parting message that will be sent to all groupchat peers when you leave the group\&.
 .sp
 .if n \{\
 .RS 4
@@ -286,6 +311,71 @@ Default path for chatlogs\&. String value\&. Absolute path for chatlog files\&.
 .RS 4
 Replace password prompt by running this command and using its output as the password\&.
 .RE
+.RE
+.PP
+\fBfriends\fR
+.RS 4
+Friend\-specific settings (prioritized over global settings)
+.PP
+\fBalias\fR
+.RS 4
+Set an alias for this friend\&. String value\&.
+.RE
+.PP
+\fBauto_accept_files\fR
+.RS 4
+Enable or disable auto\-accepting inbound file transfers\&. true or false
+.RE
+.PP
+\fBautolog\fR
+.RS 4
+Enable or disable autologging\&. true or false
+.RE
+.PP
+\fBshow_connection_msg\fR
+.RS 4
+Enable connection change notifications\&. true or false
+.RE
+.PP
+\fBtab_name_colour\fR
+.RS 4
+The colour of the friend\(cqs tab window name\&. (black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink)
+.RE
+.RE
+.PP
+\fBgroupchats\fR
+.RS 4
+Groupchat\-specific settings (prioritized over global settings)
+.PP
+\fBautolog\fR
+.RS 4
+Enable or disable autologging\&. true or false
+.RE
+.PP
+\fBtab_name_colour\fR
+.RS 4
+The colour of the group\(cqs tab window name\&. (black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink)
+.RE
+.RE
+.PP
+\fBconferences\fR
+.RS 4
+Conference\-specific settings (prioritized over global settings)
+.PP
+\fBautolog\fR
+.RS 4
+Enable or disable autologging\&. true or false
+.RE
+.PP
+\fBtab_name_colour\fR
+.RS 4
+The colour of the conferences\(cqs tab window name\&. (black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink)
+.RE
+.RE
+.PP
+\fBblocked_words\fR
+.RS 4
+A list of case\-insensitive words that cannot be sent in messages\&. String value\&. Must be enclosed in double quotes and must be ⇐ 256 characters\&.
 .RE
 .PP
 \fBsounds\fR
@@ -395,7 +485,17 @@ Toggle the peer list on and off\&.
 .RS 4
 Toggle treating linebreaks as enter key press\&.
 .RE
+.PP
+\fBreload_config\fR
+.RS 4
+Reload the Toxic config file\&.
 .RE
+.RE
+.SH "BUGS"
+.sp
+\-Non\-default colours (gray, brown, orange, and pink) will not work on terminal emulators that don\(cqt support 256\-colors\&. Konsole, qterminal and possibly others are also known to have issues with them\&. If you\(cqre using screen or tmux, try to configure it to use the xterm\-256color TERM environment variable\&.
+.sp
+\-When reloading the config file during a live session, some UI changes may be buggy and require a full client restart\&.
 .SH "FILES"
 .PP
 ~/\&.config/tox/toxic\&.conf
@@ -407,14 +507,14 @@ __DATADIR__/toxic\&.conf\&.example
 .RS 4
 Configuration example\&.
 .RE
-.SH "SEE ALSO"
-.sp
-\fBtoxic\fR(1)
 .SH "RESOURCES"
 .sp
 Project page: https://github\&.com/JFreegman/toxic
 .sp
-IRC channel: irc\&.libera\&.chat#tox
+Tox development group public key: 360497DA684BCE2A500C1AF9B3A5CE949BBB9F6FB1F91589806FB04CA039E313
 .SH "AUTHORS"
 .sp
 JFreegman <JFreegman@gmail\&.com>
+.SH "SEE ALSO"
+.sp
+\fBtoxic\fR(1)

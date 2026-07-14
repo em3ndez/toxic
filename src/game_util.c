@@ -1,30 +1,15 @@
 /*  game_util.c
  *
+ *  Copyright (C) 2020-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2020 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <stdlib.h>
-#include <stdio.h>
-#include <stdint.h>
 
 #include "game_util.h"
+#include "misc_tools.h"
 #include "toxic.h"
 #include "windows.h"
 
@@ -80,7 +65,7 @@ Direction game_util_move_towards(const Coords *coords_a, const Coords *coords_b,
 
 Direction game_util_random_direction(void)
 {
-    int r = rand() % 4;
+    const unsigned int r = rand_range_not_secure(4);
 
     switch (r) {
         case 0:
@@ -130,7 +115,6 @@ void game_util_move_coords(Direction direction, Coords *coords)
         }
 
         default: {
-            fprintf(stderr, "Warning: tried to move in an invalid direction\n");
             return;
         }
     }
@@ -138,7 +122,7 @@ void game_util_move_coords(Direction direction, Coords *coords)
 
 int game_util_random_colour(void)
 {
-    int r = rand() % 6;
+    const unsigned int r = rand_range_not_secure(6);
 
     switch (r) {
         case 0:
@@ -162,6 +146,22 @@ int game_util_random_colour(void)
         default:  // impossible
             return RED;
     }
+}
+
+void game_util_win_coords_to_board(int win_x, int win_y, int x_left_bound, int y_top_bound, Coords *coords)
+{
+    *coords = (Coords) {
+        win_x - x_left_bound,
+              win_y - y_top_bound
+    };
+}
+
+void game_util_board_to_win_coords(int board_x, int board_y, int x_left_bound, int y_top_bound, Coords *coords)
+{
+    *coords = (Coords) {
+        board_x + x_left_bound,
+                board_y + y_top_bound
+    };
 }
 
 static size_t net_pack_u16(uint8_t *bytes, uint16_t v)

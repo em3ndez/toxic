@@ -1,23 +1,9 @@
 /*  avatars.c
  *
+ *  Copyright (C) 2015-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2015 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <stdio.h>
@@ -29,12 +15,10 @@
 #include "friendlist.h"
 #include "misc_tools.h"
 
-extern FriendsList Friends;
-
 static struct Avatar {
     char name[TOX_MAX_FILENAME_LENGTH + 1];
     size_t name_len;
-    char path[PATH_MAX + 1];
+    char path[TOXIC_MAX_PATH_LENGTH + 1];
     size_t path_len;
     off_t size;
 } Avatar;
@@ -83,10 +67,10 @@ static void avatar_clear(void)
  * Returns 0 on success.
  * Returns -1 on failure.
  */
-int avatar_send(Tox *m, uint32_t friendnumber)
+int avatar_send(FriendsList *friends, Tox *tox, uint32_t friendnumber)
 {
     Tox_Err_File_Send err;
-    uint32_t filenumber = tox_file_send(m, friendnumber, TOX_FILE_KIND_AVATAR, (size_t) Avatar.size,
+    uint32_t filenumber = tox_file_send(tox, friendnumber, TOX_FILE_KIND_AVATAR, (size_t) Avatar.size,
                                         NULL, (uint8_t *) Avatar.name, Avatar.name_len, &err);
 
     if (Avatar.size == 0) {
@@ -98,7 +82,8 @@ int avatar_send(Tox *m, uint32_t friendnumber)
         return -1;
     }
 
-    struct FileTransfer *ft = new_file_transfer(NULL, friendnumber, filenumber, FILE_TRANSFER_SEND, TOX_FILE_KIND_AVATAR);
+    struct FileTransfer *ft = new_file_transfer(friends, NULL, friendnumber, filenumber, FILE_TRANSFER_SEND,
+                              TOX_FILE_KIND_AVATAR);
 
     if (!ft) {
         return -1;
@@ -117,11 +102,15 @@ int avatar_send(Tox *m, uint32_t friendnumber)
 }
 
 /* Sends avatar to all friends */
-static void avatar_send_all(Tox *m)
+static void avatar_send_all(FriendsList *friends, Tox *tox)
 {
-    for (size_t i = 0; i < Friends.max_idx; ++i) {
-        if (Friends.list[i].connection_status != TOX_CONNECTION_NONE) {
-            avatar_send(m, Friends.list[i].num);
+    if (friends == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < friends->max_idx; ++i) {
+        if (friends->list[i].connection_status != TOX_CONNECTION_NONE) {
+            avatar_send(friends, tox, friends->list[i].num);
         }
     }
 }
@@ -131,7 +120,7 @@ static void avatar_send_all(Tox *m)
  * Returns 0 on success.
  * Returns -1 on failure.
  */
-int avatar_set(Tox *m, const char *path, size_t path_len)
+int avatar_set(FriendsList *friends, Tox *tox, const char *path, size_t path_len)
 {
     if (path_len == 0 || path_len >= sizeof(Avatar.path)) {
         return -1;
@@ -152,19 +141,22 @@ int avatar_set(Tox *m, const char *path, size_t path_len)
 
     fclose(fp);
 
-    off_t size = file_size(path);
+    const off_t size = file_size(path);
 
     if (size == 0 || size > MAX_AVATAR_FILE_SIZE) {
         return -1;
     }
 
-    get_file_name(Avatar.name, sizeof(Avatar.name), path);
+    if (get_file_name(Avatar.name, sizeof(Avatar.name), path) < 0) {
+        return -1;
+    }
+
     Avatar.name_len = strlen(Avatar.name);
     snprintf(Avatar.path, sizeof(Avatar.path), "%s", path);
     Avatar.path_len = path_len;
     Avatar.size = size;
 
-    avatar_send_all(m);
+    avatar_send_all(friends, tox);
 
     return 0;
 }
@@ -174,20 +166,20 @@ int avatar_set(Tox *m, const char *path, size_t path_len)
  * Returns 0 on success.
  * Returns -1 on failure.
  */
-void avatar_unset(Tox *m)
+void avatar_unset(FriendsList *friends, Tox *tox)
 {
     avatar_clear();
-    avatar_send_all(m);
+    avatar_send_all(friends, tox);
 }
 
-void on_avatar_friend_connection_status(Tox *m, uint32_t friendnumber, Tox_Connection connection_status)
+void on_avatar_friend_connection_status(Toxic *toxic, uint32_t friendnumber, Tox_Connection connection_status)
 {
     if (connection_status == TOX_CONNECTION_NONE) {
-        kill_avatar_file_transfers_friend(m, friendnumber);
+        kill_avatar_file_transfers_friend(toxic, friendnumber);
     }
 }
 
-void on_avatar_file_control(Tox *m, struct FileTransfer *ft, Tox_File_Control control)
+void on_avatar_file_control(Toxic *toxic, struct FileTransfer *ft, Tox_File_Control control)
 {
     switch (control) {
         case TOX_FILE_CONTROL_RESUME:
@@ -204,30 +196,34 @@ void on_avatar_file_control(Tox *m, struct FileTransfer *ft, Tox_File_Control co
             break;
 
         case TOX_FILE_CONTROL_CANCEL:
-            close_file_transfer(NULL, m, ft, -1, NULL, silent);
+            close_file_transfer(NULL, toxic, ft, -1, NULL, silent);
             break;
     }
 }
 
-void on_avatar_chunk_request(Tox *m, struct FileTransfer *ft, uint64_t position, size_t length)
+void on_avatar_chunk_request(Toxic *toxic, struct FileTransfer *ft, uint64_t position, size_t length)
 {
+    if (toxic == NULL) {
+        return;
+    }
+
     if (ft->state != FILE_TRANSFER_STARTED) {
         return;
     }
 
     if (length == 0) {
-        close_file_transfer(NULL, m, ft, -1, NULL, silent);
+        close_file_transfer(NULL, toxic, ft, -1, NULL, silent);
         return;
     }
 
     if (ft->file == NULL) {
-        close_file_transfer(NULL, m, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
+        close_file_transfer(NULL, toxic, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
         return;
     }
 
     if (ft->position != position) {
         if (fseek(ft->file, position, SEEK_SET) == -1) {
-            close_file_transfer(NULL, m, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
+            close_file_transfer(NULL, toxic, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
             return;
         }
 
@@ -237,20 +233,20 @@ void on_avatar_chunk_request(Tox *m, struct FileTransfer *ft, uint64_t position,
     uint8_t *send_data = malloc(length);
 
     if (send_data == NULL) {
-        close_file_transfer(NULL, m, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
+        close_file_transfer(NULL, toxic, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
         return;
     }
 
     size_t send_length = fread(send_data, 1, length, ft->file);
 
     if (send_length != length) {
-        close_file_transfer(NULL, m, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
+        close_file_transfer(NULL, toxic, ft, TOX_FILE_CONTROL_CANCEL, NULL, silent);
         free(send_data);
         return;
     }
 
     Tox_Err_File_Send_Chunk err;
-    tox_file_send_chunk(m, ft->friendnumber, ft->filenumber, position, send_data, send_length, &err);
+    tox_file_send_chunk(toxic->tox, ft->friendnumber, ft->filenumber, position, send_data, send_length, &err);
 
     free(send_data);
 

@@ -1,23 +1,9 @@
 /*  game_centipede.c
  *
+ *  Copyright (C) 2020-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2020 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <stdio.h>
@@ -288,7 +274,7 @@ static size_t cent_enemy_agent_speed(size_t base_speed, size_t level)
         return base_speed;
     }
 
-    int r = rand() % (level / 2);
+    const unsigned int r = rand_range_not_secure(level / 2);
 
     return MIN(base_speed + r, CENT_MAX_ENEMY_AGENT_SPEED);
 }
@@ -520,7 +506,7 @@ static int cent_birth_centipede(const GameData *game, CentState *state, size_t l
 
 static int cent_init_level_centipedes(const GameData *game, CentState *state, size_t level)
 {
-    Direction dir = rand() % 2 == 0 ? WEST : EAST;
+    Direction dir = rand_range_not_secure(2) == 0 ? WEST : EAST;
 
     // First level we spawn one full size centipede
     if (level == 1) {
@@ -849,7 +835,7 @@ static void cent_bullet_move(const GameData *game, CentState *state, TIME_MS cur
     }
 }
 
-void cent_bullet_spawn(CentState *state)
+static void cent_bullet_spawn(CentState *state)
 {
     Projectile *bullet = &state->bullet;
 
@@ -1031,7 +1017,7 @@ static void cent_set_head_direction(CentState *state, Segment *head, int y_botto
         Mushroom *mush = cent_get_mushroom_at_coords(state, &next_coords);
 
         if (head->coords.x <= x_left || mush != NULL) {
-            if (mush && mush->is_poisonous) {
+            if (mush != NULL && mush->is_poisonous) {
                 cent_poison_centipede(head);
             }
 
@@ -1045,7 +1031,7 @@ static void cent_set_head_direction(CentState *state, Segment *head, int y_botto
         Mushroom *mush = cent_get_mushroom_at_coords(state, &next_coords);
 
         if (head->coords.x >= x_right || mush != NULL) {
-            if (mush && mush->is_poisonous) {
+            if (mush != NULL && mush->is_poisonous) {
                 cent_poison_centipede(head);
             }
 
@@ -1093,11 +1079,11 @@ static void cent_do_reproduce(const GameData *game, CentState *state, Segment *h
         return;
     }
 
-    Direction dir = rand() % 2 == 0 ? WEST : EAST;
+    const Direction dir = rand_range_not_secure(2) == 0 ? WEST : EAST;
 
     Coords new_coords;
     new_coords.x = dir == EAST ? x_left : x_right;
-    new_coords.y = y_bottom - (rand() % CENT_INVISIBLE_H_WALL);
+    new_coords.y = MAX(0, y_bottom - (int)rand_range_not_secure(CENT_INVISIBLE_H_WALL));
 
     if (cent_birth_centipede(game, state, 0, dir, &new_coords) == 0) {
         head->last_time_reproduced = get_unix_time();
@@ -1151,7 +1137,7 @@ static void cent_try_spawn_flea(const GameData *game, EnemyAgent *flea)
 
     flea->was_killed = false;
 
-    if (rand() % 4 == 0) {
+    if (rand_range_not_secure(4) == 0) {
         return;
     }
 
@@ -1169,7 +1155,7 @@ static void cent_try_spawn_flea(const GameData *game, EnemyAgent *flea)
     const int x_right = game_x_right_bound(game);
 
     flea->coords.y = y_top;
-    flea->coords.x = (rand() % (x_right - x_left + 1)) + x_left;
+    flea->coords.x = (int)rand_range_not_secure(x_right - x_left + 1) + x_left;
 }
 
 static void cent_do_flea(GameData *game, CentState *state, TIME_MS cur_time)
@@ -1189,7 +1175,7 @@ static void cent_do_flea(GameData *game, CentState *state, TIME_MS cur_time)
 
     const int y_bottom = game_y_bottom_bound(game);
 
-    if (flea->coords.y < (y_bottom - 5) && rand() % 4 == 0) {
+    if (flea->coords.y < y_bottom - 5 && rand_range_not_secure(4) == 0) {
         cent_mushroom_grow(game, state, &flea->coords, false);
     }
 
@@ -1215,7 +1201,7 @@ static bool cent_scorpion_spawn_check(EnemyAgent *scorpion, size_t level)
 
     scorpion->last_time_despawned = get_unix_time();
 
-    return (rand() % 4) < 3;
+    return rand_range_not_secure(4) < 3;
 }
 
 static void cent_try_spawn_scorpion(const GameData *game, CentState *state, EnemyAgent *scorpion)
@@ -1235,7 +1221,7 @@ static void cent_try_spawn_scorpion(const GameData *game, CentState *state, Enem
     scorpion->attributes = CENT_SCORPION_DEFAULT_ATTR;
     scorpion->display_char = CENT_SCORPTION_CHAR;
     scorpion->health = CENT_SCORPTION_START_HEALTH;
-    scorpion->direction = rand() % 2 == 0 ? WEST : EAST;
+    scorpion->direction = rand_range_not_secure(2) == 0 ? WEST : EAST;
 
     const int y_bottom = game_y_bottom_bound(game);
     const int x_left = game_x_left_bound(game);
@@ -1244,7 +1230,7 @@ static void cent_try_spawn_scorpion(const GameData *game, CentState *state, Enem
     const int y_mid = y_top + ((y_bottom - y_top) / 2);
 
     scorpion->coords.x = scorpion->direction == WEST ? x_right : x_left;
-    scorpion->coords.y = (y_mid - 5) + (rand() % 5);
+    scorpion->coords.y = (y_mid - 5) + (int)rand_range_not_secure(5);
 }
 
 static void cent_do_scorpion(GameData *game, CentState *state, TIME_MS cur_time)
@@ -1286,7 +1272,7 @@ static void cent_try_spawn_spider(const GameData *game, EnemyAgent *spider)
         return;
     }
 
-    if (rand() % 4 == 0) {
+    if (rand_range_not_secure(4) == 0) {
         spider->last_time_despawned = get_unix_time();
         return;
     }
@@ -1297,7 +1283,7 @@ static void cent_try_spawn_spider(const GameData *game, EnemyAgent *spider)
     spider->speed = cent_enemy_agent_speed(CENT_SPIDER_DEFAULT_SPEED, level);
     spider->attributes = CENT_SPIDER_DEFAULT_ATTR;
     spider->display_char = CENT_SPIDER_CHAR;
-    spider->start_direction = rand() % 2 == 0 ? WEST : EAST;
+    spider->start_direction = rand_range_not_secure(2) == 0 ? WEST : EAST;
     spider->direction = spider->start_direction;
     spider->health = CENT_SPIDER_START_HEALTH;
 
@@ -1306,7 +1292,8 @@ static void cent_try_spawn_spider(const GameData *game, EnemyAgent *spider)
     const int x_right = game_x_right_bound(game);
 
     spider->coords.x = spider->direction == WEST ? x_right : x_left;
-    spider->coords.y = (rand() % (y_bottom - (y_bottom - CENT_INVISIBLE_H_WALL))) + (y_bottom - CENT_INVISIBLE_H_WALL);
+    spider->coords.y = (int)rand_range_not_secure(y_bottom - (y_bottom - CENT_INVISIBLE_H_WALL))
+                       + (y_bottom - CENT_INVISIBLE_H_WALL);
 }
 
 static void cent_do_spider(GameData *game, CentState *state, TIME_MS cur_time)
@@ -1329,7 +1316,7 @@ static void cent_do_spider(GameData *game, CentState *state, TIME_MS cur_time)
                spider->coords.y,
     };
 
-    int r = rand();
+    const unsigned int r = rand_not_secure();
 
     if (spider->direction == spider->start_direction) {
         if (r % 4 == 0) {
@@ -1504,13 +1491,13 @@ static void cent_mushrooms_draw(WINDOW *win, const CentState *state)
     }
 }
 
-void cent_cb_update_game_state(GameData *game, void *cb_data)
+static void cent_cb_update_game_state(GameData *game, void *cb_data)
 {
-    if (!cb_data) {
+    CentState *state = (CentState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    CentState *state = (CentState *)cb_data;
 
     if (state->game_over) {
         return;
@@ -1528,13 +1515,13 @@ void cent_cb_update_game_state(GameData *game, void *cb_data)
     cent_do_scorpion(game, state, cur_time);
 }
 
-void cent_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
+static void cent_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
 {
-    if (!cb_data) {
+    CentState *state = (CentState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    CentState *state = (CentState *)cb_data;
 
     cent_blaster_draw(win, state);
     cent_projectiles_draw(win, state);
@@ -1543,13 +1530,13 @@ void cent_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
     cent_centipede_draw(game, win, state);
 }
 
-void cent_cb_on_keypress(GameData *game, int key, void *cb_data)
+static void cent_cb_on_keypress(GameData *game, int key, void *cb_data)
 {
-    if (!cb_data) {
+    CentState *state = (CentState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    CentState *state = (CentState *)cb_data;
 
     if (key == CENT_KEY_FIRE) {
         cent_bullet_spawn(state);
@@ -1563,13 +1550,13 @@ void cent_cb_on_keypress(GameData *game, int key, void *cb_data)
     }
 }
 
-void cent_cb_pause(GameData *game, bool is_paused, void *cb_data)
+static void cent_cb_pause(GameData *game, bool is_paused, void *cb_data)
 {
-    if (!cb_data) {
+    CentState *state = (CentState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    CentState *state = (CentState *)cb_data;
 
     TIME_S t = get_unix_time();
 
@@ -1580,13 +1567,13 @@ void cent_cb_pause(GameData *game, bool is_paused, void *cb_data)
     }
 }
 
-void cent_cb_kill(GameData *game, void *cb_data)
+static void cent_cb_kill(GameData *game, void *cb_data)
 {
-    if (!cb_data) {
+    CentState *state = (CentState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    CentState *state = (CentState *)cb_data;
 
     cent_exterminate_centipedes(&state->centipedes);
 
@@ -1634,7 +1621,7 @@ static void cent_populate_mushrooms(const GameData *game, CentState *state, int 
     const int y_floor_bound = game_y_bottom_bound(game);
 
     for (size_t i = 0; i < CENT_MUSHROOMS_LENGTH; ++i) {
-        if (rand() % population_const != 0) {
+        if (rand_range_not_secure(population_const) != 0) {
             continue;
         }
 
@@ -1671,10 +1658,7 @@ static int cent_init_state(GameData *game, CentState *state)
 
     state->mushrooms = mushrooms;
 
-    Centipedes *centipedes = &state->centipedes;
-    memset(centipedes->heads, 0, sizeof(centipedes->heads));
-
-    Direction dir = rand() % 2 == 0 ? WEST : EAST;
+    Direction dir = rand_range_not_secure(2) == 0 ? WEST : EAST;
 
     if (cent_birth_centipede(game, state, CENT_MAX_NUM_SEGMENTS, dir, NULL) == -1) {
         free(mushrooms);

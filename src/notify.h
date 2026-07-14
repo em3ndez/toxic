@@ -1,23 +1,9 @@
 /*  notify.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef NOTIFY_H
@@ -57,27 +43,38 @@ typedef enum _Flags {
     NT_WNDALERT_2 = 1 << 7, /* Alert toxic */
 
     NT_ALWAYS = 1 << 8,     /* Force sound to play */
+
+    NT_NO_INCREMENT = 1 << 9, /* Prevents notification from incrementing pending message counter in window's tab */
 } Flags;
 
-int init_notify(int login_cooldown, int notification_timeout);
+int init_notify(int login_cooldown, int notification_timeout, int device_cooldown);
 void terminate_notify(void);
 
 /* Kills all notifications for `id`. This must be called before freeing a ToxWindow. */
 void kill_notifs(int id);
 
-int sound_notify(ToxWindow *self, Notification notif, uint64_t flags, int *id_indicator);
-int sound_notify2(ToxWindow *self, Notification notif, uint64_t flags, int id);
+int sound_notify(ToxWindow *self, const Toxic *toxic, Notification notif, uint64_t flags,
+                 int *id_indicator);
+int sound_notify2(ToxWindow *self, const Toxic *toxic, Notification notif, uint64_t flags, int id);
 
 void stop_sound(int id);
 
-int box_notify(ToxWindow *self, Notification notif, uint64_t flags, int *id_indicator, const char *title,
-               const char *format, ...);
-int box_notify2(ToxWindow *self, Notification notif, uint64_t flags, int id, const char *format, ...);
-int box_silent_notify(ToxWindow *self, uint64_t flags, int *id_indicator, const char *title, const char *format, ...);
-int box_silent_notify2(ToxWindow *self, uint64_t flags, int id, const char *format, ...);
+__attribute__((format(printf, 7, 8)))
+int box_notify(ToxWindow *self, const Toxic *toxic, Notification notif, uint64_t flags,
+               int *id_indicator,
+               const char *title, const char *format, ...);
+__attribute__((format(printf, 6, 7)))
+int box_notify2(ToxWindow *self, const Toxic *toxic, Notification notif, uint64_t flags, int id,
+                const char *format, ...);
+__attribute__((format(printf, 6, 7)))
+int box_silent_notify(ToxWindow *self, const Toxic *toxic, uint64_t flags, int *id_indicator,
+                      const char *title, const char *format, ...);
+__attribute__((format(printf, 5, 6)))
+int box_silent_notify2(ToxWindow *self, const Toxic *toxic, uint64_t flags, int id,
+                       const char *format, ...);
 
 #ifdef SOUND_NOTIFY
-int set_sound(Notification sound, const char *value);
+bool set_sound(Notification sound, const char *value);
 #endif /* SOUND_NOTIFY */
 
 #endif /* NOTIFY_H */

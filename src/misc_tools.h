@@ -1,31 +1,22 @@
 /*  misc_tools.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 #ifndef MISC_TOOLS_H
 #define MISC_TOOLS_H
 
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include "toxic.h"
 #include "windows.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
 
 #ifndef MIN
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -94,11 +85,26 @@ int tox_id_bytes_to_str(const char *bin_id, size_t bin_id_size, char *output, si
 /* get the current unix time (not thread safe) */
 time_t get_unix_time(void);
 
-/* Puts the current time in buf in the format of specified by the config */
-void get_time_str(char *buf, size_t bufsize);
+/* Puts the current time in `buf` in the format of specified by `format_string`.
+ *
+ * If the passed format string is invalid, a default format will be tried. If that
+ * fails, `buf` will be set to nul.
+ */
+void get_time_str(char *buf, size_t bufsize, const char *format_string);
 
-/* Converts seconds to string in format HH:mm:ss; truncates hours and minutes when necessary */
-void get_elapsed_time_str(char *buf, int bufsize, time_t secs);
+/* Converts `elapsed_seconds` to string in format "H hours, m minutes, s seconds" and puts the resulting
+ * string in `buf`.
+ *
+ * If `elapsed_seconds` is zero, an error message is placed in `buf`.
+ */
+void get_elapsed_time_str_alt(char *buf, int bufsize, uint64_t elapsed_seconds);
+
+/* Converts `elapsed_seconds` to string in format "HH:mm:ss"; truncates hours and minutes when necessary.
+ * Puts the resulting string in `buf.
+ *
+ * If `elapsed_seconds` is zero, an error message is placed in `buf`.
+ */
+void get_elapsed_time_str(char *buf, int bufsize, uint64_t elapsed_seconds);
 
 /* get the current local time (not thread safe) */
 struct tm *get_time(void);
@@ -112,11 +118,23 @@ int wstring_is_empty(const wchar_t *string);
 /* converts a multibyte string to a wide character string (must provide buffer) */
 int char_to_wcs_buf(wchar_t *buf, const char *string, size_t n);
 
-/* converts wide character string into a multibyte string and puts in buf. */
-int wcs_to_mbs_buf(char *buf, const wchar_t *string, size_t n);
-
-/* converts a multibyte string to a wide character string and puts in buf) */
+/* Converts a multibyte string to a wide character string and puts in `buf`.
+ *
+ * `buf` must have room for at least `n` wide characters (wchar_t's).
+ *
+ * Return number of wide characters written on success.
+ * Return -1 on failure.
+ */
 int mbs_to_wcs_buf(wchar_t *buf, const char *string, size_t n);
+
+/* Converts a wide character string into a multibyte string and puts in `buf`.
+ *
+ * `buf` must have room for at least `n` bytes.
+ *
+ * Return number of bytes written on success.
+ * Return -1 on failure.
+ */
+int wcs_to_mbs_buf(char *buf, const wchar_t *string, size_t n);
 
 /* Returns 1 if connection has timed out, 0 otherwise */
 int timed_out(time_t timestamp, time_t timeout);
@@ -133,22 +151,45 @@ int qsort_strcasecmp_hlpr(const void *str1, const void *str2);
 /* case-insensitive string compare function for use with qsort */
 int qsort_ptr_char_array_helper(const void *str1, const void *str2);
 
+/* Portable wrapper for qsort_r.
+ *
+ * Signature matches the GNU version:
+ * void qsort_r(void *base, size_t nmemb, size_t size,
+ *             int (*compar)(const void *, const void *, void *),
+ *             void *arg);
+ */
+void toxic_qsort_r(void *base, size_t nmemb, size_t size,
+                   int (*compar)(const void *, const void *, void *),
+                   void *arg);
+
 /* Returns true if nick is valid.
  *
  * A valid toxic nick:
  * - cannot be empty
  * - cannot start with a space
- * - must not contain a forward slash (for logfile naming purposes)
- * - must not contain contiguous spaces
- * - must not contain a newline or tab seqeunce
+ * - cannot contain contiguous spaces
+ * - cannot contain forward slash (for log file naming purposes)
+ * - cannot contain any characters in the `invalid_nick_chars` array that
+ *   resides in misc_tools.c.
  */
 bool valid_nick(const char *nick);
 
-/* Converts all newline/tab chars to spaces (use for strings that should be contained to a single line) */
-void filter_str(char *str, size_t len);
+/* Converts all invalid single-line string characters to spaces (newlines,
+ * tabs, nul etc.).
+ *
+ * If `is_nick` is true, additional characters specific to nicks are filtered.
+ *
+ * This function is used for strings that should be human-readable, and contained
+ * to a single line, such as status messages, nicks, and group topics.
+ */
+void filter_string(char *str, size_t len, bool is_nick);
 
-/* gets base file name from path or original file name if no path is supplied */
-size_t get_file_name(char *namebuf, size_t bufsize, const char *pathname);
+/* Gets base file name from path or original file name if no path is supplied.
+ *
+ * Returns the file name length on success.
+ * Returns -1 on failure (OOM).
+ */
+int get_file_name(char *namebuf, size_t bufsize, const char *pathname);
 
 /* Gets the base directory of path and puts it in dir.
  * dir must have at least as much space as path_len.
@@ -161,15 +202,32 @@ size_t get_base_dir(const char *path, size_t path_len, char *dir);
 /* converts str to all lowercase */
 void str_to_lower(char *str);
 
-/* puts friendnum's nick in buf, truncating at TOXIC_MAX_NAME_LENGTH if necessary.
-   Returns nick len on success, -1 on failure */
-size_t get_nick_truncate(Tox *m, char *buf, uint32_t friendnum);
+/* Gets the name designated by `friendnum` via tox API call and puts it in buf,
+ * truncating the name at `buf_size`
+ *
+ * If the toxcore API call fails, put UNKNOWN_NAME in buf.
+ *
+ * Note: This function should only be used when initially adding a new friend. In all
+ * other instances, use the `get_friend_name()` function from friendlist.h.
+ *
+ * Returns the length of the resulting nick.
+ */
+size_t get_nick_truncate(Tox *tox, char *buf, uint16_t buf_size, uint32_t friendnum);
 
 /* same as get_nick_truncate but for conferences */
-int get_conference_nick_truncate(Tox *m, char *buf, uint32_t peernum, uint32_t conferencenum);
+int get_conference_nick_truncate(Tox *tox, char *buf, size_t buf_size, uint32_t peernum, uint32_t conferencenum);
 
-/* copies data to msg buffer.
-   returns length of msg, which will be no larger than size-1 */
+/* same as get_nick_truncate but for groupchats */
+size_t get_group_nick_truncate(Tox *tox, char *buf, size_t buf_size, uint32_t peer_id, uint32_t groupnum);
+
+/* same as get_group_nick_truncate() but for self. */
+size_t get_group_self_nick_truncate(Tox *tox, char *buf, size_t buf_size, uint32_t groupnum);
+
+/* Copies up to `size` bytes from the `data` string of length `length` to the `msg` buffer,
+ * replacing all \t and \v bytes with spaces, and removing all \r bytes.
+ *
+ * Returns the length of the resulting string in `msg`, which is guaranteed to be NUL-terminated.
+ */
 size_t copy_tox_str(char *msg, size_t size, const char *data, size_t length);
 
 /* returns index of the first instance of ch in s starting at idx.
@@ -183,7 +241,7 @@ int char_rfind(const char *s, char ch, int len);
 /* Converts bytes to appropriate unit and puts in buf as a string */
 void bytes_convert_str(char *buf, int size, uint64_t bytes);
 
-/* checks if a file exists. Returns true or false */
+/* Returns true if the file pointed to by `path` exists. */
 bool file_exists(const char *path);
 
 /*
@@ -213,5 +271,47 @@ void free_ptr_array(void **arr);
  * The caller is responsible for freeing the array with `free_ptr_array`.
  */
 void **malloc_ptr_array(size_t length, size_t bytes);
+
+/*
+ * Returns a non-cryptographically secure random unsigned integer between zero and `upper_bound`
+ * which is limited by RAND_MAX.
+ *
+ * This function should only be used for non-crypto related things.
+ */
+unsigned int rand_range_not_secure(unsigned int upper_bound);
+
+/*
+ * Returns a non-cryptographically secure random unsigned integer between zero and RAND_MAX.
+ *
+ * This function should only be used for non-crypto related things.
+ */
+unsigned int rand_not_secure(void);
+
+/*
+ * Returns an integer associated with an ncurses foreground colour, per the COLOUR_PAIR enum
+ * in windows.h.
+ *
+ * Valid colour strings are: black, white, gray, brown, red, green, blue, cyan, yellow, magenta,
+ *   orange, pink
+ *
+ * Returns -1 if colour is invalid.
+ */
+int colour_string_to_int(const char *colour);
+
+/*
+ * A wrapper for strftime() from time.h. We use this wrapper to suppress
+ * gcc compiler warnings produced by the -Wformat-nonliteral flag.
+ */
+size_t format_time_str(char *s, size_t max, const char *format, const struct tm *tm);
+
+/*
+ * Returns true if `line` contains a word that's in the client's blocked words list.
+ */
+bool string_contains_blocked_word(const char *line, const Client_Data *client_data);
+
+#ifdef __cplusplus
+} /* extern "C" */
+
+#endif /* __cplusplus */
 
 #endif /* MISC_TOOLS_H */

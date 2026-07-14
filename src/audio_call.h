@@ -1,23 +1,9 @@
 /*  audio_call.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef AUDIO_CALL_H
@@ -56,6 +42,14 @@ typedef enum CallStatus {
     cs_Active
 } CallStatus;
 
+typedef struct AudioTransmissionContext {
+    ToxAV *av;
+    uint32_t friend_number;
+    int32_t audio_frame_duration;
+    uint32_t audio_sample_rate;
+    uint8_t audio_channels;
+} AudioTransmissionContext;
+
 typedef struct Call {
     CallStatus status;
     uint32_t state; /* ToxAV call state, valid when `status == cs_Active` */
@@ -65,6 +59,8 @@ typedef struct Call {
     uint32_t vin_idx, vout_idx; /* Video device index, or -1 if not open */
     uint32_t video_width, video_height;
     uint32_t video_bit_rate; /* Bit rate for sending video; 0 for no video */
+
+    AudioTransmissionContext audio_tx_ctx;
 } Call;
 
 struct CallControl {
@@ -73,10 +69,7 @@ struct CallControl {
     VideoError video_errors;
 #endif /* VIDEO */
 
-    ToxAV *av;
-    ToxWindow *prompt;
-
-    Call *calls;
+    Call **calls;
     uint32_t max_calls;
 
     bool audio_enabled;
@@ -92,18 +85,22 @@ struct CallControl {
     uint32_t default_video_bit_rate;
 };
 
-extern struct CallControl CallControl;
-
 /* You will have to pass pointer to first member of 'windows' declared in windows.c */
-ToxAV *init_audio(ToxWindow *self, Tox *tox);
-void terminate_audio(void);
+ToxAV *init_audio(Toxic *toxic);
+void terminate_audio(ToxAV *av, struct CallControl *cc);
 
-bool init_call(Call *call);
+bool init_call(struct CallControl *cc, Call *call, uint32_t friend_number);
 
-void place_call(ToxWindow *self);
-void stop_current_call(ToxWindow *self);
+void place_call(ToxWindow *self, Toxic *toxic);
+void stop_current_call(ToxWindow *self, Toxic *toxic);
 
-void init_friend_AV(uint32_t index);
-void del_friend_AV(uint32_t index);
+/*
+ * Initializes the call structure for a given friend. Called when a friend is added
+ * to the friends list. Index must be equivalent to the friend's friendlist index.
+ *
+ * Returns true on success.
+ */
+bool init_friend_AV(struct CallControl *cc, uint32_t index);
+void del_friend_AV(struct CallControl *cc, uint32_t index);
 
 #endif /* AUDIO_CALL_H */

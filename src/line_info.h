@@ -1,30 +1,23 @@
 /*  line_info.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef LINE_INFO_H
 #define LINE_INFO_H
 
+#include <time.h>
+
+#include "settings.h"
 #include "toxic.h"
 #include "windows.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
 
 #define MAX_HISTORY 100000
 #define MIN_HISTORY 40
@@ -39,6 +32,8 @@ typedef enum LINE_TYPE {
     IN_ACTION,
     OUT_ACTION,
     OUT_ACTION_READ,     /* same as OUT_MSG_READ but for actions */
+    IN_PRVT_MSG,   /* PRVT should only be used for groups */
+    OUT_PRVT_MSG,
     PROMPT,
     CONNECTION,
     DISCONNECTION,
@@ -46,11 +41,11 @@ typedef enum LINE_TYPE {
 } LINE_TYPE;
 
 struct line_info {
-    char timestr[TIME_STR_SIZE];
-    char name1[TOXIC_MAX_NAME_LENGTH + 1];
-    char name2[TOXIC_MAX_NAME_LENGTH + 1];
-    char msg[MAX_LINE_INFO_MSG_SIZE];
-    time_t timestamp;
+    char    timestr[TIME_STR_SIZE];
+    char    name1[TOXIC_MAX_NAME_LENGTH + 1];
+    char    name2[TOXIC_MAX_NAME_LENGTH + 1];
+    wchar_t msg[MAX_LINE_INFO_MSG_SIZE];
+    time_t  timestamp;
     uint8_t type;
     uint8_t bold;
     uint8_t colour;
@@ -58,7 +53,7 @@ struct line_info {
     bool    read_flag;     /* true if a message has been flagged as read */
     uint32_t id;
     uint16_t len;        /* combined length of entire line */
-    uint16_t msg_len;    /* length of the message */
+    uint16_t msg_width;    /* width of the message */
     uint16_t format_lines;  /* number of lines the combined string takes up (dynamically set) */
 
     struct line_info *prev;
@@ -78,14 +73,24 @@ struct history {
 
 /* creates new line_info line and puts it in the queue.
  *
- * Returns the id of the new line.
+ * Returns the ID of the new line on success.
  * Returns -1 on failure.
  */
-int line_info_add(ToxWindow *self, bool show_timestamp, const char *name1, const char *name2, LINE_TYPE type,
-                  uint8_t bold, uint8_t colour, const char *msg, ...);
+__attribute__((format(printf, 9, 10)))
+int line_info_add(ToxWindow *self, const Client_Config *c_config, bool show_timestamp, const char *name1,
+                  const char *name2, LINE_TYPE type, uint8_t bold, uint8_t colour, const char *msg, ...);
+
+/*
+ * Similar to line_info_add() but uses lines from history.
+ *
+ * Returns the ID of the new line on success.
+ * Returns -1 on failure.
+ */
+int line_info_load_history(ToxWindow *self, const Client_Config *c_config, const char *timestamp,
+                           const char *name, LINE_TYPE type, bool bold, int colour, const char *message);
 
 /* Prints a section of history starting at line_start */
-void line_info_print(ToxWindow *self);
+void line_info_print(ToxWindow *self, const Client_Config *c_config);
 
 /* frees all history lines */
 void line_info_cleanup(struct history *hst);
@@ -105,6 +110,25 @@ struct line_info *line_info_get(ToxWindow *self, uint32_t id);
 void line_info_reset_start(ToxWindow *self, struct history *hst);
 
 void line_info_init(struct history *hst);
-bool line_info_onKey(ToxWindow *self, wint_t key);    /* returns true if key is a match */
+
+/* returns true if key is a match */
+bool line_info_onKey(ToxWindow *self, const Client_Config *c_config, wint_t key);
+
+/**
+ * Converts the multibyte string `msg` into a wide character string and puts
+ * the result in `buf`.
+ *
+ * @param buf is the buffer to put the wide character string in.
+ * @param buf_size is the number of wide characters that `buf` can hold.
+ *
+ * @return the widechar width of the string.
+ * @private
+ */
+uint16_t line_info_add_msg(wchar_t *buf, size_t buf_size, const char *msg);
+
+#ifdef __cplusplus
+} /* extern "C" */
+
+#endif /* __cplusplus */
 
 #endif /* LINE_INFO_H */

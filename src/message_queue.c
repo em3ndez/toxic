@@ -1,23 +1,9 @@
 /*  message_queue.c
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <stdlib.h>
@@ -48,10 +34,10 @@ void cqueue_add(struct chat_queue *q, const char *msg, size_t len, uint8_t type,
         return;
     }
 
-    struct cqueue_msg *new_m = malloc(sizeof(struct cqueue_msg));
+    struct cqueue_msg *new_m = calloc(1, sizeof(struct cqueue_msg));
 
     if (new_m == NULL) {
-        exit_toxic_err("failed in cqueue_message", FATALERR_MEMORY);
+        exit_toxic_err(FATALERR_MEMORY, "failed in cqueue_message");
     }
 
     snprintf(new_m->message, sizeof(new_m->message), "%s", msg);
@@ -62,6 +48,7 @@ void cqueue_add(struct chat_queue *q, const char *msg, size_t len, uint8_t type,
     new_m->time_added = get_unix_time();
     new_m->receipt = -1;
     new_m->next = NULL;
+    new_m->noread_flag = false;
 
     if (q->root == NULL) {
         new_m->prev = NULL;
@@ -93,11 +80,14 @@ static void cqueue_mark_read(ToxWindow *self, struct cqueue_msg *msg)
 }
 
 /* removes message with matching receipt from queue, writes to log and updates line to show the message was received. */
-void cqueue_remove(ToxWindow *self, Tox *m, uint32_t receipt)
+void cqueue_remove(ToxWindow *self, Toxic *toxic, uint32_t receipt)
 {
     struct chatlog *log = self->chatwin->log;
     struct chat_queue *q = self->chatwin->cqueue;
     struct cqueue_msg *msg = q->root;
+
+    Tox *tox = toxic->tox;
+    const Client_Config *c_config = toxic->c_config;
 
     while (msg) {
         if (msg->receipt != receipt) {
@@ -106,13 +96,14 @@ void cqueue_remove(ToxWindow *self, Tox *m, uint32_t receipt)
         }
 
         if (log->log_on) {
-            char selfname[TOX_MAX_NAME_LENGTH];
-            tox_self_get_name(m, (uint8_t *) selfname);
+            char selfname[TOX_MAX_NAME_LENGTH + 1];
+            tox_self_get_name(tox, (uint8_t *) selfname);
 
-            size_t len = tox_self_get_name_size(m);
-            selfname[len] = 0;
+            const size_t len = tox_self_get_name_size(tox);
+            selfname[len] = '\0';
 
-            write_to_log(msg->message, selfname, log, msg->type == OUT_ACTION);
+            write_to_log(log, c_config, msg->message, selfname,
+                         msg->type == OUT_MSG ? LOG_HINT_NORMAL_O : LOG_HINT_ACTION);
         }
 
         cqueue_mark_read(self, msg);
@@ -189,7 +180,7 @@ void cqueue_check_unread(ToxWindow *self)
  * Tries to send all messages in the send queue in sequential order.
  * If a message fails to send the function will immediately return.
  */
-void cqueue_try_send(ToxWindow *self, Tox *m)
+void cqueue_try_send(ToxWindow *self, Tox *tox)
 {
     struct chat_queue *q = self->chatwin->cqueue;
     struct cqueue_msg *msg = q->root;
@@ -203,9 +194,9 @@ void cqueue_try_send(ToxWindow *self, Tox *m)
             return;
         }
 
-        TOX_ERR_FRIEND_SEND_MESSAGE err;
+        Tox_Err_Friend_Send_Message err;
         Tox_Message_Type type = msg->type == OUT_MSG ? TOX_MESSAGE_TYPE_NORMAL : TOX_MESSAGE_TYPE_ACTION;
-        uint32_t receipt = tox_friend_send_message(m, self->num, type, (uint8_t *) msg->message, msg->len, &err);
+        uint32_t receipt = tox_friend_send_message(tox, self->num, type, (uint8_t *) msg->message, msg->len, &err);
 
         if (err != TOX_ERR_FRIEND_SEND_MESSAGE_OK) {
             return;

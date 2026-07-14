@@ -1,26 +1,11 @@
 /*  execute.c
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
-#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,6 +14,7 @@
 #include "execute.h"
 #include "global_commands.h"
 #include "conference_commands.h"
+#include "groupchat_commands.h"
 #include "line_info.h"
 #include "misc_tools.h"
 #include "notify.h"
@@ -36,8 +22,8 @@
 #include "windows.h"
 
 struct cmd_func {
-    const char *name;
-    void (*func)(WINDOW *w, ToxWindow *, Tox *m, int argc, char (*argv)[MAX_STR_SIZE]);
+    const char *const name;
+    void (*func)(WINDOW *w, ToxWindow *, Toxic *toxic, int argc, char (*argv)[MAX_STR_SIZE]);
 };
 
 static struct cmd_func global_commands[] = {
@@ -45,14 +31,17 @@ static struct cmd_func global_commands[] = {
     { "/add",       cmd_add           },
     { "/avatar",    cmd_avatar        },
     { "/clear",     cmd_clear         },
+    { "/color",     cmd_color         },
     { "/connect",   cmd_connect       },
     { "/decline",   cmd_decline       },
     { "/exit",      cmd_quit          },
     { "/conference", cmd_conference    },
+    { "/group",     cmd_groupchat     },
 #ifdef GAMES
     { "/game",      cmd_game          },
 #endif
     { "/help",      cmd_prompt_help   },
+    { "/join",      cmd_join          },
     { "/log",       cmd_log           },
     { "/myid",      cmd_myid          },
 #ifdef QRCODE
@@ -80,9 +69,12 @@ static struct cmd_func global_commands[] = {
 };
 
 static struct cmd_func chat_commands[] = {
+    { "/autoaccept", cmd_autoaccept_files  },
     { "/cancel",    cmd_cancelfile        },
-    { "/invite",    cmd_conference_invite },
-    { "/join",      cmd_conference_join   },
+    { "/cinvite",   cmd_invite_to_conference },
+    { "/cjoin",     cmd_conference_join   },
+    { "/gaccept",   cmd_group_accept      },
+    { "/invite",    cmd_invite_to_group   },
 #ifdef GAMES
     { "/play",      cmd_game_join         },
 #endif
@@ -106,6 +98,8 @@ static struct cmd_func chat_commands[] = {
 };
 
 static struct cmd_func conference_commands[] = {
+    { "/chatid",    cmd_conference_chatid    },
+    { "/cinvite",   cmd_conference_invite    },
     { "/title",     cmd_conference_set_title },
 
 #ifdef AUDIO
@@ -117,25 +111,58 @@ static struct cmd_func conference_commands[] = {
     { NULL,         NULL             },
 };
 
-
-#ifdef PYTHON
-#define SPECIAL_COMMANDS 8
-#else
-#define SPECIAL_COMMANDS 7
-#endif /* PYTHON */
+static struct cmd_func groupchat_commands[] = {
+    { "/chatid",    cmd_chatid         },
+    { "/disconnect", cmd_disconnect    },
+    { "/ignore",    cmd_ignore         },
+    { "/invite",    cmd_group_invite   },
+    { "/kick",      cmd_kick           },
+    { "/list",      cmd_list           },
+    { "/locktopic", cmd_set_topic_lock },
+    { "/mod",       cmd_mod            },
+    { "/nick",      cmd_group_nick     },
+    { "/passwd",    cmd_set_passwd     },
+    { "/peerlimit", cmd_set_peerlimit  },
+    { "/privacy",   cmd_set_privacy    },
+    { "/rejoin",    cmd_rejoin         },
+    { "/silence",   cmd_silence        },
+    { "/topic",     cmd_set_topic      },
+    { "/unignore",  cmd_unignore       },
+    { "/unmod",     cmd_unmod          },
+    { "/unsilence", cmd_unsilence      },
+    { "/voice",     cmd_set_voice      },
+    { "/whois",     cmd_whois          },
+    { NULL,         NULL               },
+};
 
 /* Special commands are commands that only take one argument even if it contains spaces */
-static const char special_commands[SPECIAL_COMMANDS][MAX_CMDNAME_SIZE] = {
+static const char special_commands[][MAX_CMDNAME_SIZE] = {
     "/add",
     "/avatar",
+    "/cinvite",
+    "/gaccept",
+    "/group",
+    "/ignore",
+    "/invite",
+    "/kick",
+    "/mod",
     "/nick",
     "/note",
+    "/passwd",
+    "/rejoin",
+    "/silence",
+    "/topic",
+    "/unignore",
+    "/unmod",
+    "/unsilence",
+    "/whois",
 #ifdef PYTHON
     "/run",
 #endif /* PYTHON */
     "/sendfile",
     "/title",
     "/mute",
+    "",
 };
 
 /* Returns true if input command is in the special_commands array. */
@@ -143,7 +170,7 @@ static bool is_special_command(const char *input)
 {
     const int s = char_find(0, input, ' ');
 
-    for (int i = 0; i < SPECIAL_COMMANDS; ++i) {
+    for (int i = 0; special_commands[i][0] != '\0'; ++i) {
         if (strncmp(input, special_commands[i], s) == 0) {
             return true;
         }
@@ -188,7 +215,7 @@ static int parse_command(const char *input, char (*args)[MAX_STR_SIZE])
     char *cmd = strdup(input);
 
     if (cmd == NULL) {
-        exit_toxic_err("failed in parse_command", FATALERR_MEMORY);
+        return -1;
     }
 
     int num_args = 0;
@@ -217,12 +244,12 @@ static int parse_command(const char *input, char (*args)[MAX_STR_SIZE])
  * Returns 0 on match.
  * Returns 1 on no match
  */
-static int do_command(WINDOW *w, ToxWindow *self, Tox *m, int num_args, struct cmd_func *commands,
+static int do_command(WINDOW *w, ToxWindow *self, Toxic *toxic, int num_args, struct cmd_func *commands,
                       char (*args)[MAX_STR_SIZE])
 {
     for (size_t i = 0; commands[i].name != NULL; ++i) {
         if (strcmp(args[0], commands[i].name) == 0) {
-            (commands[i].func)(w, self, m, num_args - 1, args);
+            (commands[i].func)(w, self, toxic, num_args - 1, args);
             return 0;
         }
     }
@@ -230,16 +257,17 @@ static int do_command(WINDOW *w, ToxWindow *self, Tox *m, int num_args, struct c
     return 1;
 }
 
-void execute(WINDOW *w, ToxWindow *self, Tox *m, const char *input, int mode)
+void execute(WINDOW *w, ToxWindow *self, Toxic *toxic, const char *input, int mode)
 {
     if (string_is_empty(input)) {
         return;
     }
 
     char args[MAX_NUM_ARGS][MAX_STR_SIZE];
-    int num_args = parse_command(input, args);
+    const int num_args = parse_command(input, args);
 
     if (num_args <= 0) {
+        fprintf(stderr, "Warning: parse_command(%s, %d) failed in execute()\n", input, mode);
         return;
     }
 
@@ -249,22 +277,32 @@ void execute(WINDOW *w, ToxWindow *self, Tox *m, const char *input, int mode)
      * Note: Global commands must come last in case of duplicate command names
      */
     switch (mode) {
-        case CHAT_COMMAND_MODE:
-            if (do_command(w, self, m, num_args, chat_commands, args) == 0) {
+        case CHAT_COMMAND_MODE: {
+            if (do_command(w, self, toxic, num_args, chat_commands, args) == 0) {
                 return;
             }
 
             break;
+        }
 
-        case CONFERENCE_COMMAND_MODE:
-            if (do_command(w, self, m, num_args, conference_commands, args) == 0) {
+        case CONFERENCE_COMMAND_MODE: {
+            if (do_command(w, self, toxic, num_args, conference_commands, args) == 0) {
                 return;
             }
 
             break;
+        }
+
+        case GROUPCHAT_COMMAND_MODE: {
+            if (do_command(w, self, toxic, num_args, groupchat_commands, args) == 0) {
+                return;
+            }
+
+            break;
+        }
     }
 
-    if (do_command(w, self, m, num_args, global_commands, args) == 0) {
+    if (do_command(w, self, toxic, num_args, global_commands, args) == 0) {
         return;
     }
 
@@ -276,5 +314,5 @@ void execute(WINDOW *w, ToxWindow *self, Tox *m, const char *input, int mode)
 
 #endif
 
-    line_info_add(self, false, NULL, NULL, SYS_MSG, 0, 0, "Invalid command.");
+    line_info_add(self, toxic->c_config, false, NULL, NULL, SYS_MSG, 0, 0, "Invalid command.");
 }

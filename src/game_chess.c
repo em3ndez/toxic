@@ -1,23 +1,9 @@
 /*  game_chess.c
  *
+ *  Copyright (C) 2020-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2020 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <stdio.h>
@@ -38,6 +24,12 @@
 #define CHESS_TILE_SIZE_Y 2
 #define CHESS_SQUARES (CHESS_BOARD_ROWS * CHESS_BOARD_COLUMNS)
 #define CHESS_MAX_MESSAGE_SIZE 64
+
+/* Packet sizes */
+#define CHESS_PACKET_SEND_MOVE_LENGTH 5
+#define CHESS_PACKET_RESIGN_LENGTH 1
+#define CHESS_PACKET_SEND_INVITE_LENGTH 2
+#define CHESS_PACKET_ACCEPT_INVITE_LENGTH 1
 
 typedef enum ChessPacketType {
     CHESS_PACKET_INIT_SEND_INVITE   = 0x01,
@@ -508,12 +500,12 @@ static bool chess_path_diagonal_clear(Board *board, const Tile *from, const Tile
     bool left_diag = (from->chess_coords.N > to->chess_coords.N && from->chess_coords.L < to->chess_coords.L)
                      || (from->chess_coords.N < to->chess_coords.N && from->chess_coords.L > to->chess_coords.L);
 
-    size_t from_l_idx = chess_get_letter_index(from->chess_coords.L);
-    size_t to_l_idx = chess_get_letter_index(to->chess_coords.L);
-    size_t start_l_idx = left_diag ? MAX(from_l_idx, to_l_idx) - 1 : MIN(from_l_idx, to_l_idx) + 1;
+    const int from_l_idx = chess_get_letter_index(from->chess_coords.L);
+    const int to_l_idx = chess_get_letter_index(to->chess_coords.L);
+    int start_l_idx = left_diag ? MAX(from_l_idx, to_l_idx) - 1 : MIN(from_l_idx, to_l_idx) + 1;
 
-    if (start_l_idx == -1) {
-        return -1;
+    if (start_l_idx < 0) {
+        return false;
     }
 
     ChessCoords chess_coords;
@@ -521,7 +513,7 @@ static bool chess_path_diagonal_clear(Board *board, const Tile *from, const Tile
     for (size_t i = start; i < end; ++i) {
         chess_coords.N = i;
 
-        if (start_l_idx >= CHESS_NUM_BOARD_LETTERS) {
+        if (start_l_idx >= CHESS_NUM_BOARD_LETTERS || start_l_idx < 0) {
             return false;
         }
 
@@ -804,11 +796,13 @@ static bool chess_mock_move_valid(ChessState *state, const Player *player, Tile 
 {
     Board *board = &state->board;
 
+    const bool en_passant = player->en_passant_move_number == -1;
     bool in_check = false;
     Tile *ep_tile = NULL;
     Piece ep_piece;
+    memset(&ep_piece, 0, sizeof(ep_piece));
 
-    if (player->en_passant_move_number == -1) {  // remove piece that was captured via en passant
+    if (en_passant) {  // remove piece that was captured via en passant
         ChessCoords ep_coords;
         ep_coords.N = player->colour == White ? to->chess_coords.N - 1 : to->chess_coords.N + 1;
         ep_coords.L = to->chess_coords.L;
@@ -819,7 +813,7 @@ static bool chess_mock_move_valid(ChessState *state, const Player *player, Tile 
         }
 
         chess_copy_piece(&ep_piece, &ep_tile->piece);
-        ep_tile->piece.type = NoPiece;
+        ep_tile->piece.type = NoPiece;  // temporarily remove piece
     }
 
     Piece from_piece;
@@ -835,8 +829,8 @@ static bool chess_mock_move_valid(ChessState *state, const Player *player, Tile 
     from->piece.type = from_piece.type;
     chess_copy_piece(&to->piece, &to_piece);
 
-    if (player->en_passant_move_number == -1) {
-        ep_tile->piece.type = ep_piece.type;
+    if (en_passant) {
+        ep_tile->piece.type = ep_piece.type;  // reset piece to original state
     }
 
     return !in_check;
@@ -1476,25 +1470,25 @@ static int chess_get_display_colour(ChessColour p_colour, int tile_colour)
     }
 }
 
-void chess_move_curs_up_left(ChessState *state)
+static void chess_move_curs_up_left(ChessState *state)
 {
     chess_move_curs_left(state);
     chess_move_curs_up(state);
 }
 
-void chess_move_curs_up_right(ChessState *state)
+static void chess_move_curs_up_right(ChessState *state)
 {
     chess_move_curs_right(state);
     chess_move_curs_up(state);
 }
 
-void chess_move_curs_down_left(ChessState *state)
+static void chess_move_curs_down_left(ChessState *state)
 {
     chess_move_curs_left(state);
     chess_move_curs_down(state);
 }
 
-void chess_move_curs_down_right(ChessState *state)
+static void chess_move_curs_down_right(ChessState *state)
 {
     chess_move_curs_right(state);
     chess_move_curs_down(state);
@@ -1706,13 +1700,13 @@ static void chess_draw_interface(const GameData *game, WINDOW *win, ChessState *
     chess_print_captured(game, win, state);
 }
 
-void chess_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
+static void chess_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
 {
-    if (!cb_data) {
+    ChessState *state = (ChessState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    ChessState *state = (ChessState *)cb_data;
 
     move(state->curs_y, state->curs_x);
 
@@ -1722,13 +1716,13 @@ void chess_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
     chess_draw_interface(game, win, state);
 }
 
-void chess_cb_on_keypress(GameData *game, int key, void *cb_data)
+static void chess_cb_on_keypress(GameData *game, int key, void *cb_data)
 {
-    if (!cb_data) {
+    ChessState *state = (ChessState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    ChessState *state = (ChessState *)cb_data;
 
     switch (key) {
         case KEY_LEFT: {
@@ -1785,13 +1779,13 @@ void chess_cb_on_keypress(GameData *game, int key, void *cb_data)
     }
 }
 
-void chess_cb_kill(GameData *game, void *cb_data)
+static void chess_cb_kill(GameData *game, void *cb_data)
 {
-    if (!cb_data) {
+    ChessState *state = (ChessState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    ChessState *state = (ChessState *)cb_data;
 
     free(state);
 
@@ -1809,14 +1803,9 @@ void chess_cb_kill(GameData *game, void *cb_data)
  * Return 0 on success.
  * Return -1 on failure.
  */
-#define CHESS_PACKET_MOVE_SIZE 4
 static int chess_handle_opponent_move_packet(const GameData *game, ChessState *state, const uint8_t *data,
         size_t length)
 {
-    if (length < CHESS_PACKET_MOVE_SIZE || data == NULL) {
-        return -1;
-    }
-
     char from_l = data[0];
     uint8_t from_n = data[1];
     char to_l = data[2];
@@ -1883,20 +1872,25 @@ static void chess_notify(const GameData *game, ChessPacketType type)
 
 static void chess_cb_on_packet(GameData *game, const uint8_t *data, size_t length, void *cb_data)
 {
+    ChessState *state = (ChessState *)cb_data;
+
+    if (state == NULL) {
+        return;
+    }
+
     if (length == 0 || data == NULL) {
         return;
     }
-
-    if (cb_data == NULL) {
-        return;
-    }
-
-    ChessState *state = (ChessState *)cb_data;
 
     ChessPacketType type = data[0];
 
     switch (type) {
         case CHESS_PACKET_INIT_ACCEPT_INVITE: {
+            if (length != CHESS_PACKET_ACCEPT_INVITE_LENGTH) {
+                fprintf(stderr, "Got invalid length invite accept packet (%zu)\n", length);
+                break;
+            }
+
             if (state->status == Initializing) {
                 state->status = Playing;
             }
@@ -1913,8 +1907,14 @@ static void chess_cb_on_packet(GameData *game, const uint8_t *data, size_t lengt
         }
 
         case CHESS_PACKET_MOVE_PIECE: {
+            if (length != CHESS_PACKET_SEND_MOVE_LENGTH) {
+                state->status = Resigned;
+                fprintf(stderr, "Got invalid length move packet (%zu)\n", length);
+                break;
+            }
+
             if (state->status == Playing) {
-                int ret = chess_handle_opponent_move_packet(game, state, data + 1, length - 1);
+                const int ret = chess_handle_opponent_move_packet(game, state, data + 1, length - 1);
 
                 if (ret != 0) {
                     state->status = Resigned;
@@ -2041,10 +2041,10 @@ static int chess_init_board(GameData *game, ChessState *state, bool self_is_whit
 
 static int chess_packet_send_resign(const GameData *game)
 {
-    uint8_t data[1];
+    uint8_t data[CHESS_PACKET_RESIGN_LENGTH];
     data[0] = CHESS_PACKET_RESIGN;
 
-    if (game_packet_send(game, data, 1, GP_Data) == -1) {
+    if (game_packet_send(game, data, sizeof(data), GP_Data) == -1) {
         return -1;
     }
 
@@ -2053,14 +2053,14 @@ static int chess_packet_send_resign(const GameData *game)
 
 static int chess_packet_send_move(const GameData *game, const Tile *from, const Tile *to)
 {
-    uint8_t data[5];
+    uint8_t data[CHESS_PACKET_SEND_MOVE_LENGTH];
     data[0] = CHESS_PACKET_MOVE_PIECE;
     data[1] = from->chess_coords.L;
     data[2] = from->chess_coords.N;
     data[3] = to->chess_coords.L;
     data[4] = to->chess_coords.N;
 
-    if (game_packet_send(game, data, 5, GP_Data) == -1) {
+    if (game_packet_send(game, data, sizeof(data), GP_Data) == -1) {
         return -1;
     }
 
@@ -2069,11 +2069,11 @@ static int chess_packet_send_move(const GameData *game, const Tile *from, const 
 
 static int chess_packet_send_invite(const GameData *game, bool self_is_white)
 {
-    uint8_t data[2];
+    uint8_t data[CHESS_PACKET_SEND_INVITE_LENGTH];
     data[0] = CHESS_PACKET_INIT_SEND_INVITE;
     data[1] = self_is_white ? Black : White;
 
-    if (game_packet_send(game, data, 2, GP_Invite) == -1) {
+    if (game_packet_send(game, data, sizeof(data), GP_Invite) == -1) {
         return -1;
     }
 
@@ -2082,17 +2082,17 @@ static int chess_packet_send_invite(const GameData *game, bool self_is_white)
 
 static int chess_packet_send_accept(const GameData *game)
 {
-    uint8_t data[1];
+    uint8_t data[CHESS_PACKET_ACCEPT_INVITE_LENGTH];
     data[0] = CHESS_PACKET_INIT_ACCEPT_INVITE;
 
-    if (game_packet_send(game, data, 1, GP_Data) == -1) {
+    if (game_packet_send(game, data, sizeof(data), GP_Data) == -1) {
         return -1;
     }
 
     return 0;
 }
 
-int chess_initialize(GameData *game, const uint8_t *init_data, size_t length)
+int chess_initialize(GameData *game, const uint8_t *init_data, size_t length, bool self_host)
 {
     if (game_set_window_shape(game, GW_ShapeSquare) == -1) {
         return -1;
@@ -2104,14 +2104,17 @@ int chess_initialize(GameData *game, const uint8_t *init_data, size_t length)
         return -3;
     }
 
-    bool self_is_host = false;
-    bool self_is_white = false;
+    bool self_is_white = rand_range_not_secure(2) == 0;
 
-    if (length == 0) {
-        self_is_host = true;
-        self_is_white = rand() % 2 == 0;
-    } else {
-        if (length < 2 || init_data[0] != CHESS_PACKET_INIT_SEND_INVITE) {
+    if (!self_host) {
+        if (length != CHESS_PACKET_SEND_INVITE_LENGTH) {
+            fprintf(stderr, "Tried to join a game with invalid game data of length %zu\n", length);
+            free(state);
+            return -2;
+        }
+
+        if (init_data[0] != CHESS_PACKET_INIT_SEND_INVITE) {
+            fprintf(stderr, "Failed to join chess game: invalid invite data\n");
             free(state);
             return -2;
         }
@@ -2139,7 +2142,7 @@ int chess_initialize(GameData *game, const uint8_t *init_data, size_t length)
     state->other.can_castle_ks = true;
     state->other.can_castle_qs = true;
 
-    if (self_is_host) {
+    if (self_host) {
         if (chess_packet_send_invite(game, self_is_white) == -1) {
             free(state);
             return -2;

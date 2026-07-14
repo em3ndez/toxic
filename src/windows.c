@@ -1,26 +1,12 @@
 /*  windows.c
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
-#include <ctype.h>
+#include <assert.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,334 +16,415 @@
 #include "conference.h"
 #include "file_transfers.h"
 #include "friendlist.h"
+#include "groupchats.h"
 #include "line_info.h"
+#include "log.h"
 #include "misc_tools.h"
 #include "prompt.h"
 #include "settings.h"
 #include "toxic.h"
 #include "windows.h"
 
+#ifdef AUDIO
+#include "audio_call.h"
+#endif
+
 #ifdef GAMES
 #include "game_base.h"
 #endif
 
-extern char *DATA_FILE;
-extern struct Winthread Winthread;
-
-ToxWindow *windows[MAX_WINDOWS_NUM];
-static uint8_t active_window_index;
-static int num_active_windows;
-
-extern ToxWindow *prompt;
-extern struct user_settings *user_settings;
-
 /* CALLBACKS START */
-void on_friend_request(Tox *m, const uint8_t *public_key, const uint8_t *data, size_t length, void *userdata)
+void on_friend_request(Tox *tox, const uint8_t *public_key, const uint8_t *data, size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
     char msg[MAX_STR_SIZE + 1];
     length = copy_tox_str(msg, sizeof(msg), (const char *) data, length);
+    filter_string(msg, length, false);
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onFriendRequest != NULL) {
-            windows[i]->onFriendRequest(windows[i], m, (const char *) public_key, msg, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onFriendRequest != NULL) {
+            w->onFriendRequest(w, toxic, (const char *) public_key, msg, length);
         }
     }
 }
 
-void on_friend_connection_status(Tox *m, uint32_t friendnumber, Tox_Connection connection_status, void *userdata)
+void on_friend_connection_status(Tox *tox, uint32_t friendnumber, Tox_Connection connection_status, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
 
-    on_avatar_friend_connection_status(m, friendnumber, connection_status);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onConnectionChange != NULL) {
-            windows[i]->onConnectionChange(windows[i], m, friendnumber, connection_status);
+    on_avatar_friend_connection_status(toxic, friendnumber, connection_status);
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onConnectionChange != NULL) {
+            w->onConnectionChange(w, toxic, friendnumber, connection_status);
         }
     }
 
     flag_interface_refresh();
 }
 
-void on_friend_typing(Tox *m, uint32_t friendnumber, bool is_typing, void *userdata)
+void on_friend_typing(Tox *tox, uint32_t friendnumber, bool is_typing, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    if (user_settings->show_typing_other == SHOW_TYPING_OFF) {
+    if (!toxic->c_config->show_typing_other) {
         return;
     }
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onTypingChange != NULL) {
-            windows[i]->onTypingChange(windows[i], m, friendnumber, is_typing);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onTypingChange != NULL) {
+            w->onTypingChange(w, toxic, friendnumber, is_typing);
         }
     }
 
     flag_interface_refresh();
 }
 
-void on_friend_message(Tox *m, uint32_t friendnumber, Tox_Message_Type type, const uint8_t *string, size_t length,
+void on_friend_message(Tox *tox, uint32_t friendnumber, Tox_Message_Type type, const uint8_t *string, size_t length,
                        void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
     char msg[MAX_STR_SIZE + 1];
     length = copy_tox_str(msg, sizeof(msg), (const char *) string, length);
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onMessage != NULL) {
-            windows[i]->onMessage(windows[i], m, friendnumber, type, msg, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onMessage != NULL) {
+            w->onMessage(w, toxic, friendnumber, type, msg, length);
         }
     }
 }
 
-void on_friend_name(Tox *m, uint32_t friendnumber, const uint8_t *string, size_t length, void *userdata)
+void on_friend_name(Tox *tox, uint32_t friendnumber, const uint8_t *string, size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    if (friend_config_alias_is_set(toxic->friends, friendnumber)) {
+        return;
+    }
 
     char nick[TOXIC_MAX_NAME_LENGTH + 1];
     length = copy_tox_str(nick, sizeof(nick), (const char *) string, length);
-    filter_str(nick, length);
+    filter_string(nick, length, true);
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onNickChange != NULL) {
-            windows[i]->onNickChange(windows[i], m, friendnumber, nick, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onNickChange != NULL) {
+            w->onNickChange(w, toxic, friendnumber, nick, length);
         }
     }
 
     flag_interface_refresh();
 
-    store_data(m, DATA_FILE);
+    store_data(toxic);
 }
 
-void on_friend_status_message(Tox *m, uint32_t friendnumber, const uint8_t *string, size_t length, void *userdata)
+void on_friend_status_message(Tox *tox, uint32_t friendnumber, const uint8_t *string, size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
-    UNUSED_VAR(m);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
     char msg[TOX_MAX_STATUS_MESSAGE_LENGTH + 1];
     length = copy_tox_str(msg, sizeof(msg), (const char *) string, length);
-    filter_str(msg, length);
+    filter_string(msg, length, false);
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onStatusMessageChange != NULL) {
-            windows[i]->onStatusMessageChange(windows[i], friendnumber, msg, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onStatusMessageChange != NULL) {
+            w->onStatusMessageChange(w, toxic, friendnumber, msg, length);
         }
     }
 
     flag_interface_refresh();
 }
 
-void on_friend_status(Tox *m, uint32_t friendnumber, Tox_User_Status status, void *userdata)
+void on_friend_status(Tox *tox, uint32_t friendnumber, Tox_User_Status status, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onStatusChange != NULL) {
-            windows[i]->onStatusChange(windows[i], m, friendnumber, status);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onStatusChange != NULL) {
+            w->onStatusChange(w, toxic, friendnumber, status);
         }
     }
 
     flag_interface_refresh();
 }
 
-void on_friend_added(Tox *m, uint32_t friendnumber, bool sort)
+// TODO: This isn't a proper tox callback. Refactor with friendlist.
+void on_friend_added(Toxic *toxic, uint32_t friendnumber, bool sort)
 {
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onFriendAdded != NULL) {
-            windows[i]->onFriendAdded(windows[i], m, friendnumber, sort);
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onFriendAdded != NULL) {
+            w->onFriendAdded(w, toxic, friendnumber, sort);
         }
     }
 
-    store_data(m, DATA_FILE);
+    store_data(toxic);
 }
 
-void on_conference_message(Tox *m, uint32_t conferencenumber, uint32_t peernumber, Tox_Message_Type type,
+void on_conference_message(Tox *tox, uint32_t conferencenumber, uint32_t peernumber, Tox_Message_Type type,
                            const uint8_t *message, size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
     char msg[MAX_STR_SIZE + 1];
     length = copy_tox_str(msg, sizeof(msg), (const char *) message, length);
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onConferenceMessage != NULL) {
-            windows[i]->onConferenceMessage(windows[i], m, conferencenumber, peernumber, type, msg, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onConferenceMessage != NULL) {
+            w->onConferenceMessage(w, toxic, conferencenumber, peernumber, type, msg, length);
         }
     }
 }
 
-void on_conference_invite(Tox *m, uint32_t friendnumber, Tox_Conference_Type type, const uint8_t *conference_pub_key,
+void on_conference_invite(Tox *tox, uint32_t friendnumber, Tox_Conference_Type type, const uint8_t *conference_pub_key,
                           size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onConferenceInvite != NULL) {
-            windows[i]->onConferenceInvite(windows[i], m, friendnumber, type, (char *) conference_pub_key, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onConferenceInvite != NULL) {
+            w->onConferenceInvite(w, toxic, friendnumber, type, (const char *) conference_pub_key, length);
         }
     }
 }
 
-void on_conference_peer_list_changed(Tox *m, uint32_t conferencenumber, void *userdata)
+void on_conference_peer_list_changed(Tox *tox, uint32_t conferencenumber, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onConferenceNameListChange != NULL) {
-            windows[i]->onConferenceNameListChange(windows[i], m, conferencenumber);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onConferenceNameListChange != NULL) {
+            w->onConferenceNameListChange(w, toxic, conferencenumber);
         }
     }
 
     flag_interface_refresh();
 }
 
-void on_conference_peer_name(Tox *m, uint32_t conferencenumber, uint32_t peernumber, const uint8_t *name,
+void on_conference_peer_name(Tox *tox, uint32_t conferencenumber, uint32_t peernumber, const uint8_t *name,
                              size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
     char nick[TOXIC_MAX_NAME_LENGTH + 1];
     length = copy_tox_str(nick, sizeof(nick), (const char *) name, length);
-    filter_str(nick, length);
+    filter_string(nick, length, true);
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onConferencePeerNameChange != NULL) {
-            windows[i]->onConferencePeerNameChange(windows[i], m, conferencenumber, peernumber, nick, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onConferencePeerNameChange != NULL) {
+            w->onConferencePeerNameChange(w, toxic, conferencenumber, peernumber, nick, length);
         }
     }
 }
 
-void on_conference_title(Tox *m, uint32_t conferencenumber, uint32_t peernumber, const uint8_t *title, size_t length,
+void on_conference_title(Tox *tox, uint32_t conferencenumber, uint32_t peernumber, const uint8_t *title, size_t length,
                          void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
     char data[MAX_STR_SIZE + 1];
     length = copy_tox_str(data, sizeof(data), (const char *) title, length);
+    filter_string(data, length, false);
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onConferenceTitleChange != NULL) {
-            windows[i]->onConferenceTitleChange(windows[i], m, conferencenumber, peernumber, data, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onConferenceTitleChange != NULL) {
+            w->onConferenceTitleChange(w, toxic, conferencenumber, peernumber, data, length);
         }
     }
 }
 
-void on_file_chunk_request(Tox *m, uint32_t friendnumber, uint32_t filenumber, uint64_t position,
+void on_file_chunk_request(Tox *tox, uint32_t friendnumber, uint32_t filenumber, uint64_t position,
                            size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    struct FileTransfer *ft = get_file_transfer_struct(friendnumber, filenumber);
+    FileTransfer *ft = get_file_transfer_struct(toxic->friends, friendnumber, filenumber);
 
-    if (!ft) {
+    if (ft == NULL) {
         return;
     }
 
     if (ft->file_type == TOX_FILE_KIND_AVATAR) {
-        on_avatar_chunk_request(m, ft, position, length);
+        on_avatar_chunk_request(toxic, ft, position, length);
         return;
     }
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onFileChunkRequest != NULL) {
-            windows[i]->onFileChunkRequest(windows[i], m, friendnumber, filenumber, position, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onFileChunkRequest != NULL) {
+            w->onFileChunkRequest(w, toxic, friendnumber, filenumber, position, length);
         }
     }
 }
 
-void on_file_recv_chunk(Tox *m, uint32_t friendnumber, uint32_t filenumber, uint64_t position,
+void on_file_recv_chunk(Tox *tox, uint32_t friendnumber, uint32_t filenumber, uint64_t position,
                         const uint8_t *data, size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    struct FileTransfer *ft = get_file_transfer_struct(friendnumber, filenumber);
+    const FileTransfer *ft = get_file_transfer_struct(toxic->friends, friendnumber, filenumber);
 
-    if (!ft) {
+    if (ft == NULL) {
         return;
     }
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onFileRecvChunk != NULL) {
-            windows[i]->onFileRecvChunk(windows[i], m, friendnumber, filenumber, position, (char *) data, length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onFileRecvChunk != NULL) {
+            w->onFileRecvChunk(w, toxic, friendnumber, filenumber, position, (const char *) data, length);
         }
     }
 }
 
-void on_file_recv_control(Tox *m, uint32_t friendnumber, uint32_t filenumber, Tox_File_Control control,
+void on_file_recv_control(Tox *tox, uint32_t friendnumber, uint32_t filenumber, Tox_File_Control control,
                           void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    struct FileTransfer *ft = get_file_transfer_struct(friendnumber, filenumber);
+    FileTransfer *ft = get_file_transfer_struct(toxic->friends, friendnumber, filenumber);
 
-    if (!ft) {
+    if (ft == NULL) {
         return;
     }
 
     if (ft->file_type == TOX_FILE_KIND_AVATAR) {
-        on_avatar_file_control(m, ft, control);
+        on_avatar_file_control(toxic, ft, control);
         return;
     }
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onFileControl != NULL) {
-            windows[i]->onFileControl(windows[i], m, friendnumber, filenumber, control);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onFileControl != NULL) {
+            w->onFileControl(w, toxic, friendnumber, filenumber, control);
         }
     }
 }
 
-void on_file_recv(Tox *m, uint32_t friendnumber, uint32_t filenumber, uint32_t kind, uint64_t file_size,
-                  const uint8_t *filename, size_t filename_length, void *userdata)
+void on_file_recv(Tox *tox, uint32_t friendnumber, uint32_t filenumber, uint32_t kind, uint64_t file_size,
+                  const uint8_t *string, size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    char filename[MAX_STR_SIZE + 1];
+    length = copy_tox_str(filename, sizeof(filename), (const char *) string, length);
+    filter_string(filename, length, false);
 
     /* We don't care about receiving avatars */
     if (kind != TOX_FILE_KIND_DATA) {
-        tox_file_control(m, friendnumber, filenumber, TOX_FILE_CONTROL_CANCEL, NULL);
+        tox_file_control(tox, friendnumber, filenumber, TOX_FILE_CONTROL_CANCEL, NULL);
         return;
     }
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onFileRecv != NULL) {
-            windows[i]->onFileRecv(windows[i], m, friendnumber, filenumber, file_size, (char *) filename,
-                                   filename_length);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onFileRecv != NULL) {
+            w->onFileRecv(w, toxic, friendnumber, filenumber, file_size, filename, length);
         }
     }
 }
 
-void on_friend_read_receipt(Tox *m, uint32_t friendnumber, uint32_t receipt, void *userdata)
+void on_friend_read_receipt(Tox *tox, uint32_t friendnumber, uint32_t receipt, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] != NULL && windows[i]->onReadReceipt != NULL) {
-            windows[i]->onReadReceipt(windows[i], m, friendnumber, receipt);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onReadReceipt != NULL) {
+            w->onReadReceipt(w, toxic, friendnumber, receipt);
         }
     }
 }
 
-void on_lossless_custom_packet(Tox *m, uint32_t friendnumber, const uint8_t *data, size_t length, void *userdata)
+void on_lossless_custom_packet(Tox *tox, uint32_t friendnumber, const uint8_t *data, size_t length, void *userdata)
 {
-    UNUSED_VAR(userdata);
+    UNUSED_VAR(tox);
 
     if (length == 0 || data == NULL) {
         return;
     }
 
-    uint8_t type = data[0];
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    const uint8_t type = data[0];
 
     switch (type) {
 #ifdef GAMES
 
         case CUSTOM_PACKET_GAME_INVITE: {
-            for (size_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-                ToxWindow *window = windows[i];
+            for (uint16_t i = 0; i < windows->count; ++i) {
+                ToxWindow *w = windows->list[i];
 
-                if (window != NULL && window->onGameInvite != NULL) {
-                    window->onGameInvite(window, m, friendnumber, data + 1, length - 1);
+                if (w->onGameInvite != NULL) {
+                    w->onGameInvite(w, toxic, friendnumber, data + 1, length - 1);
                 }
             }
 
@@ -365,17 +432,19 @@ void on_lossless_custom_packet(Tox *m, uint32_t friendnumber, const uint8_t *dat
         }
 
         case CUSTOM_PACKET_GAME_DATA: {
-            for (size_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-                ToxWindow *window = windows[i];
+            for (uint16_t i = 0; i < windows->count; ++i) {
+                ToxWindow *w = windows->list[i];
 
-                if (window != NULL && window->onGameData != NULL) {
-                    window->onGameData(window, m, friendnumber, data + 1, length - 1);
+                if (w->onGameData != NULL) {
+                    w->onGameData(w, toxic, friendnumber, data + 1, length - 1);
                 }
             }
 
             break;
         }
 
+#else
+        UNUSED_VAR(toxic);
 #endif // GAMES
 
         default: {
@@ -385,126 +454,497 @@ void on_lossless_custom_packet(Tox *m, uint32_t friendnumber, const uint8_t *dat
     }
 }
 
-/* CALLBACKS END */
-
-int add_window(Tox *m, ToxWindow *w)
+void on_group_invite(Tox *tox, uint32_t friendnumber, const uint8_t *invite_data, size_t length,
+                     const uint8_t *group_name,
+                     size_t group_name_length, void *userdata)
 {
-    if (LINES < 2) {
-        return -1;
+    UNUSED_VAR(tox);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    char gname[MAX_STR_SIZE + 1];
+    group_name_length = copy_tox_str(gname, sizeof(gname), (const char *) group_name, group_name_length);
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupInvite != NULL) {
+            w->onGroupInvite(w, toxic, friendnumber, (const char *) invite_data, length, gname,
+                             group_name_length);
+        }
+    }
+}
+
+void on_group_message(Tox *tox, uint32_t groupnumber, uint32_t peer_id, Tox_Message_Type type,
+                      const uint8_t *message, size_t length, Tox_Group_Message_Id message_id, void *userdata)
+{
+    UNUSED_VAR(message_id);
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    char msg[MAX_STR_SIZE + 1];
+    length = copy_tox_str(msg, sizeof(msg), (const char *) message, length);
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupMessage != NULL) {
+            w->onGroupMessage(w, toxic, groupnumber, peer_id, type, msg, length);
+        }
+    }
+}
+
+void on_group_private_message(Tox *tox, uint32_t groupnumber, uint32_t peer_id, Tox_Message_Type type,
+                              const uint8_t *message, size_t length, Tox_Group_Message_Id message_id,
+                              void *userdata)
+{
+    UNUSED_VAR(tox);
+    UNUSED_VAR(type);
+    UNUSED_VAR(message_id);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    char msg[MAX_STR_SIZE + 1];
+    length = copy_tox_str(msg, sizeof(msg), (const char *) message, length);
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupPrivateMessage != NULL) {
+            w->onGroupPrivateMessage(w, toxic, groupnumber, peer_id, msg, length);
+        }
+    }
+}
+
+void on_group_status_change(Tox *tox, uint32_t groupnumber, uint32_t peer_id, Tox_User_Status status, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupStatusChange != NULL) {
+            w->onGroupStatusChange(w, toxic, groupnumber, peer_id, status);
+        }
     }
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; i++) {
-        if (windows[i] != NULL) {
-            continue;
+    flag_interface_refresh();
+}
+
+void on_group_peer_join(Tox *tox, uint32_t groupnumber, uint32_t peer_id, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupPeerJoin != NULL) {
+            w->onGroupPeerJoin(w, toxic, groupnumber, peer_id);
         }
+    }
 
-        w->index = i;
-        w->window = newwin(LINES, COLS, 0, 0);
+    flag_interface_refresh();
+}
 
-        if (w->window == NULL) {
-            return -1;
+void on_group_peer_exit(Tox *tox, uint32_t groupnumber, uint32_t peer_id, Tox_Group_Exit_Type exit_type,
+                        const uint8_t *nick,
+                        size_t nick_len, const uint8_t *part_message, size_t length, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    char toxic_nick[TOXIC_MAX_NAME_LENGTH + 1];
+    nick_len = copy_tox_str(toxic_nick, sizeof(toxic_nick), (const char *) nick, nick_len);
+    filter_string(toxic_nick, nick_len, true);
+
+    char buf[MAX_STR_SIZE + 1] = {0};
+    size_t buf_len = 0;
+
+    if (part_message) {
+        buf_len = copy_tox_str(buf, sizeof(buf), (const char *) part_message, length);
+        filter_string(buf, buf_len, false);
+    }
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupPeerExit != NULL) {
+            w->onGroupPeerExit(w, toxic, groupnumber, peer_id, exit_type, toxic_nick, nick_len, buf, buf_len);
         }
+    }
+}
 
-#ifdef URXVT_FIX
-        /* Fixes text color problem on some terminals. */
-        wbkgd(w->window, COLOR_PAIR(6));
-#endif
-        windows[i] = w;
+void on_group_topic_change(Tox *tox, uint32_t groupnumber, uint32_t peer_id, const uint8_t *topic, size_t length,
+                           void *userdata)
+{
+    UNUSED_VAR(tox);
 
-        if (w->onInit) {
-            w->onInit(w, m);
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    char data[MAX_STR_SIZE + 1];
+    length = copy_tox_str(data, sizeof(data), (const char *) topic, length);
+    filter_string(data, length, false);
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupTopicChange != NULL) {
+            w->onGroupTopicChange(w, toxic, groupnumber, peer_id, data, length);
         }
+    }
+}
 
-        ++num_active_windows;
+void on_group_peer_limit(Tox *tox, uint32_t groupnumber, uint32_t peer_limit, void *userdata)
+{
+    UNUSED_VAR(tox);
 
-        return i;
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupPeerLimit != NULL) {
+            w->onGroupPeerLimit(w, toxic, groupnumber, peer_limit);
+        }
+    }
+}
+
+void on_group_privacy_state(Tox *tox, uint32_t groupnumber, Tox_Group_Privacy_State privacy_state, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupPrivacyState != NULL) {
+            w->onGroupPrivacyState(w, toxic, groupnumber, privacy_state);
+        }
+    }
+}
+
+void on_group_topic_lock(Tox *tox, uint32_t groupnumber, Tox_Group_Topic_Lock topic_lock, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupTopicLock != NULL) {
+            w->onGroupTopicLock(w, toxic, groupnumber, topic_lock);
+        }
+    }
+}
+
+void on_group_password(Tox *tox, uint32_t groupnumber, const uint8_t *password, size_t length, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupPassword != NULL) {
+            w->onGroupPassword(w, toxic, groupnumber, (const char *) password, length);
+        }
+    }
+}
+
+void on_group_nick_change(Tox *tox, uint32_t groupnumber, uint32_t peer_id, const uint8_t *newname, size_t length,
+                          void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    char name[TOXIC_MAX_NAME_LENGTH + 1];
+    length = copy_tox_str(name, sizeof(name), (const char *) newname, length);
+    filter_string(name, length, true);
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupNickChange != NULL) {
+            w->onGroupNickChange(w, toxic, groupnumber, peer_id, name, length);
+        }
+    }
+}
+
+void on_group_self_join(Tox *tox, uint32_t groupnumber, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupSelfJoin != NULL) {
+            w->onGroupSelfJoin(w, toxic, groupnumber);
+        }
+    }
+}
+
+void on_group_rejected(Tox *tox, uint32_t groupnumber, Tox_Group_Join_Fail type, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupRejected != NULL) {
+            w->onGroupRejected(w, toxic, groupnumber, type);
+        }
+    }
+}
+
+void on_group_moderation(Tox *tox, uint32_t groupnumber, uint32_t source_peer_id, uint32_t target_peer_id,
+                         Tox_Group_Mod_Event type, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupModeration != NULL) {
+            w->onGroupModeration(w, toxic, groupnumber, source_peer_id, target_peer_id, type);
+        }
+    }
+}
+
+void on_group_voice_state(Tox *tox, uint32_t groupnumber, Tox_Group_Voice_State voice_state, void *userdata)
+{
+    UNUSED_VAR(tox);
+
+    Toxic *toxic = (Toxic *) userdata;
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onGroupVoiceState != NULL) {
+            w->onGroupVoiceState(w, toxic, groupnumber, voice_state);
+        }
+    }
+}
+
+/*
+ * Returns the windows list index of the window associated with `id`.
+ * Returns -1 if `id` is not found.
+ */
+static int get_window_index(Windows *windows, uint16_t id)
+{
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        if (windows->list[i]->id == id) {
+            return i;
+        }
     }
 
     return -1;
 }
 
-void set_active_window_index(uint8_t index)
+static uint16_t get_new_window_id(Windows *windows)
 {
-    if (index < MAX_WINDOWS_NUM) {
-        active_window_index = index;
+    uint16_t new_id = 0;
+
+    for (uint16_t i = 0; i < UINT16_MAX; ++i) {
+        if (get_window_pointer_by_id(windows, i) == NULL) {
+            new_id = i;
+            break;
+        }
     }
+
+    return new_id;
+}
+
+/* CALLBACKS END */
+
+int add_window(Toxic *toxic, ToxWindow *w)
+{
+    if (w == NULL || LINES < 2) {
+        fprintf(stderr, "Failed to add window.\n");
+        return -1;
+    }
+
+    Windows *windows = toxic->windows;
+    const uint16_t new_index = windows->count;
+
+    w->id = get_new_window_id(windows);
+    w->window = newwin(LINES, COLS, 0, 0);
+
+    if (w->window == NULL) {
+        fprintf(stderr, "newwin() failed in add_window()\n");
+        return -1;
+    }
+
+    w->colour = BAR_TEXT;
+
+#ifdef URXVT_FIX
+    /* Fixes text color problem on some terminals. */
+    wbkgd(w->window, COLOR_PAIR(6));
+#endif
+
+    if (w->onInit) {
+        w->onInit(w, toxic);
+    }
+
+    ToxWindow **tmp_list = (ToxWindow **)realloc(windows->list, (windows->count + 1) * sizeof(ToxWindow *));
+
+    if (tmp_list == NULL) {
+        exit_toxic_err(FATALERR_MEMORY, "realloc(_, %d * sizeof(ToxWindow *)) failed in add_window()", windows->count + 1);
+    }
+
+    tmp_list[new_index] = w;
+    windows->list = tmp_list;
+    ++windows->count;
+
+    return w->id;
+}
+
+void set_active_window_by_type(Windows *windows, Window_Type type)
+{
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        if (windows->list[i]->type == type) {
+            windows->active_index = i;
+            return;
+        }
+    }
+
+    fprintf(stderr, "Warning: attemping to set active window with no active type: %d\n", type);
+}
+
+void set_active_window_by_id(Windows *windows, uint16_t id)
+{
+    const int idx = get_window_index(windows, id);
+
+    if (idx < 0) {
+        fprintf(stderr, "Warning: attemping to set active window with invalid id: %u\n", id);
+        return;
+    }
+
+    windows->active_index = idx;
 }
 
 /* Displays the next window if `ch` is equal to the next window key binding.
  * Otherwise displays the previous window.
  */
-static void set_next_window(int ch)
+static void set_next_window(Windows *windows, const Client_Config *c_config, int ch)
 {
-    uint8_t index = 0;
-
-    if (ch == user_settings->key_next_tab) {
-        for (uint8_t i = active_window_index + 1; i < MAX_WINDOWS_NUM; ++i) {
-            if (windows[i] != NULL) {
-                index = i;
-                break;
-            }
-        }
-    } else {
-        uint8_t start = active_window_index == 0 ? MAX_WINDOWS_NUM - 1 : active_window_index - 1;
-
-        for (uint8_t i = start; i > 0; --i) {
-            if (windows[i] != NULL) {
-                index = i;
-                break;
-            }
-        }
+    if (windows->count == 0) {
+        return;
     }
 
-    set_active_window_index(index);
+    if (ch == c_config->key_next_tab) {
+        windows->active_index = (windows->active_index + 1) % windows->count;
+        return;
+    }
+
+    if (ch == c_config->key_prev_tab) {
+        windows->active_index = windows->active_index > 0 ? windows->active_index - 1 : windows->count - 1;
+        return;
+    }
+
+    fprintf(stderr, "Warning: set_next_window() got invalid key: %c\n", ch);
 }
 
 /* Deletes window w and cleans up */
-void del_window(ToxWindow *w)
+void del_window(ToxWindow *w, Windows *windows, const Client_Config *c_config)
 {
-    uint8_t idx = w->index;
+    const int idx = get_window_index(windows, w->id);
+
+    if (idx < 0) {
+        return;
+    }
+
     delwin(w->window_bar);
     delwin(w->window);
     free(w);
-    windows[idx] = NULL;
+
+    assert(windows->count > 0);
+
+    --windows->count;
+
+    if (windows->count != idx) {
+        windows->list[idx] = windows->list[windows->count];
+    }
+
+    windows->list[windows->count] = NULL;
+
+    if (windows->count == 0) {
+        free(windows->list);
+        windows->list = NULL;
+        return;
+    }
+
+    ToxWindow **tmp_list = (ToxWindow **)realloc(windows->list, windows->count * sizeof(ToxWindow *));
+
+    if (tmp_list == NULL) {
+        exit_toxic_err(FATALERR_MEMORY,
+                       "realloc(_, %d * sizeof(ToxWindow *)) failed in del_window()", windows->count);
+    }
+
+    windows->list = tmp_list;
 
     clear();
     refresh();
 
-    if (num_active_windows > 0) {
-        if (active_window_index == 2) {    // if closing current window would bring us to friend list
-            set_next_window(-1);           // skip back to the home window instead. FIXME: magic numbers
-        }
-
-        set_next_window(-1);
-
-        --num_active_windows;
+    if (windows->active_index == 2) {  // skip back to home window instead of friendlist
+        set_next_window(windows, c_config, c_config->key_prev_tab);
     }
+
+    set_next_window(windows, c_config, c_config->key_prev_tab);
 }
 
-ToxWindow *init_windows(Tox *m)
+void init_windows(Toxic *toxic)
 {
     if (COLS <= CHATBOX_HEIGHT + WINDOW_BAR_HEIGHT) {
-        exit_toxic_err("add_window() for prompt failed in init_windows", FATALERR_WININIT);
+        exit_toxic_err(FATALERR_WININIT, "add_window() for prompt failed in init_windows");
     }
 
-    prompt = new_prompt();
+    toxic->home_window = new_prompt();
 
-    int n_prompt = add_window(m, prompt);
+    const int win_num = add_window(toxic, toxic->home_window);
 
-    if (n_prompt < 0) {
-        exit_toxic_err("add_window() for prompt failed in init_windows", FATALERR_WININIT);
+    if (win_num != 0) {  // prompt window is always index 0
+        exit_toxic_err(FATALERR_WININIT, "add_window() for prompt failed in init_windows");
     }
 
-    if (add_window(m, new_friendlist()) == -1) {
-        exit_toxic_err("add_window() for friendlist failed in init_windows", FATALERR_WININIT);
+    if (add_window(toxic, new_friendlist()) != 1) {  // friendlist is always index 1
+        exit_toxic_err(FATALERR_WININIT, "add_window() for friendlist failed in init_windows");
     }
 
-    set_active_window_index(n_prompt);
-
-    return prompt;
+    set_active_window_by_id(toxic->windows, win_num);
 }
 
-void on_window_resize(void)
+void on_window_resize(Windows *windows)
 {
     endwin();
     refresh();
@@ -513,8 +953,8 @@ void on_window_resize(void)
     int x2;
     int y2;
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        ToxWindow *w = windows[i];
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
 
         if (w == NULL) {
             continue;
@@ -555,10 +995,12 @@ void on_window_resize(void)
             wclear(w->help->win);
         }
 
-        if (w->type == WINDOW_TYPE_CONFERENCE) {
+        if (w->type == WINDOW_TYPE_CONFERENCE || w->type == WINDOW_TYPE_GROUPCHAT) {
             delwin(w->chatwin->sidebar);
             w->chatwin->sidebar = NULL;
-        } else {
+        }
+
+        if (w->type != WINDOW_TYPE_CONFERENCE) {
             delwin(w->stb->topline);
         }
 
@@ -578,17 +1020,20 @@ void on_window_resize(void)
         }
 
         if (w->show_peerlist) {
-            w->chatwin->history = subwin(w->window, y2 - CHATBOX_HEIGHT - WINDOW_BAR_HEIGHT, x2 - SIDEBAR_WIDTH - 1, 0, 0);
-            w->chatwin->sidebar = subwin(w->window, y2 - CHATBOX_HEIGHT - WINDOW_BAR_HEIGHT, SIDEBAR_WIDTH, 0, x2 - SIDEBAR_WIDTH);
+            w->chatwin->history = subwin(w->window, y2 - CHATBOX_HEIGHT - WINDOW_BAR_HEIGHT,
+                                         x2 - SIDEBAR_WIDTH - 1, 0, 0);
+            w->chatwin->sidebar = subwin(w->window, y2 - CHATBOX_HEIGHT - WINDOW_BAR_HEIGHT,
+                                         SIDEBAR_WIDTH, 0, x2 - SIDEBAR_WIDTH);
         } else {
             w->chatwin->history =  subwin(w->window, y2 - CHATBOX_HEIGHT - WINDOW_BAR_HEIGHT, x2, 0, 0);
-
-            if (w->type != WINDOW_TYPE_CONFERENCE) {
-                w->stb->topline = subwin(w->window, TOP_BAR_HEIGHT, x2, 0, 0);
-            }
         }
 
-        w->window_bar = subwin(w->window, WINDOW_BAR_HEIGHT, x2, y2 - (CHATBOX_HEIGHT + WINDOW_BAR_HEIGHT), 0);
+        if (w->type != WINDOW_TYPE_CONFERENCE) {
+            w->stb->topline = subwin(w->window, TOP_BAR_HEIGHT, x2, 0, 0);
+        }
+
+        w->window_bar = subwin(w->window, WINDOW_BAR_HEIGHT, x2,
+                               y2 - (CHATBOX_HEIGHT + WINDOW_BAR_HEIGHT), 0);
         w->chatwin->linewin = subwin(w->window, CHATBOX_HEIGHT, x2, y2 - WINDOW_BAR_HEIGHT, 0);
 
 #ifdef AUDIO
@@ -602,6 +1047,11 @@ void on_window_resize(void)
 
         scrollok(w->chatwin->history, 0);
         wmove(w->window, y2 - CURS_Y_OFFSET, 0);
+
+        if (!w->scroll_pause) {
+            ChatContext *ctx = w->chatwin;
+            line_info_reset_start(w, ctx->hst);
+        }
     }
 }
 
@@ -609,12 +1059,12 @@ static void draw_window_tab(WINDOW *win, ToxWindow *toxwin, bool active_window)
 {
     pthread_mutex_lock(&Winthread.lock);
 
-    bool has_alert = toxwin->alert != WINDOW_ALERT_NONE;
-    unsigned int pending_messages = toxwin->pending_messages;
+    const bool has_alert = toxwin->alert != WINDOW_ALERT_NONE;
+    const unsigned int pending_messages = toxwin->pending_messages;
 
     pthread_mutex_unlock(&Winthread.lock);
 
-    WINDOW_TYPE type = toxwin->type;
+    Window_Type type = toxwin->type;
 
     if (active_window) {
         wattron(win, A_BOLD | COLOR_PAIR(BAR_ACCENT));
@@ -635,8 +1085,18 @@ static void draw_window_tab(WINDOW *win, ToxWindow *toxwin, bool active_window)
         }
     }
 
-    if (active_window || (type == WINDOW_TYPE_PROMPT || type == WINDOW_TYPE_FRIEND_LIST)) {
+    if (type == WINDOW_TYPE_PROMPT || type == WINDOW_TYPE_FRIEND_LIST) {
+        if (!has_alert) {
+            wattron(win, COLOR_PAIR(toxwin->colour));
+            wprintw(win, "%s", toxwin->name);
+            wattroff(win, COLOR_PAIR(toxwin->colour));
+        } else {
+            wprintw(win, "%s", toxwin->name);
+        }
+    } else if (active_window) {
+        wattron(win, COLOR_PAIR(toxwin->colour));
         wprintw(win, "%s", toxwin->name);
+        wattroff(win, COLOR_PAIR(toxwin->colour));
     } else {
         if (pending_messages > 0) {
             wprintw(win, "%u", pending_messages);
@@ -665,7 +1125,7 @@ static void draw_window_tab(WINDOW *win, ToxWindow *toxwin, bool active_window)
     }
 }
 
-void draw_window_bar(ToxWindow *self)
+void draw_window_bar(ToxWindow *self, Windows *windows)
 {
     WINDOW *win = self->window_bar;
     wclear(win);
@@ -680,20 +1140,16 @@ void draw_window_bar(ToxWindow *self)
         wattroff(win, COLOR_PAIR(BAR_TEXT));
     }
 
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        if (windows[i] == NULL) {
-            continue;
-        }
-
-        bool active_window = i == active_window_index;
-        draw_window_tab(win, windows[i], active_window);
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        const bool active_window = i == windows->active_index;
+        draw_window_tab(win, windows->list[i], active_window);
     }
 
     int cur_x;
     int cur_y;
-    UNUSED_VAR(cur_y);
-
     getyx(win, cur_y, cur_x);
+
+    UNUSED_VAR(cur_y);
 
     wattron(win, COLOR_PAIR(BAR_TEXT));
     mvwhline(win, 0, cur_x, ' ', COLS - cur_x);
@@ -742,6 +1198,7 @@ static struct key_sequence_codes {
     wchar_t *code;
     wint_t   key;
 } Keys[] = {
+
     { L"[1;5A", T_KEY_C_UP    },
     { L"[1;5B", T_KEY_C_DOWN  },
     { L"[1;5C", T_KEY_C_RIGHT },
@@ -787,9 +1244,16 @@ static wint_t get_input_sequence_code(void)
     return -1;
 }
 
-void draw_active_window(Tox *m)
+void draw_active_window(Toxic *toxic)
 {
-    ToxWindow *a = windows[active_window_index];
+    if (toxic == NULL) {
+        return;
+    }
+
+    const Client_Config *c_config = toxic->c_config;
+    Windows *windows = toxic->windows;
+
+    ToxWindow *a = windows->list[windows->active_index];
 
     if (a == NULL) {
         return;
@@ -798,19 +1262,19 @@ void draw_active_window(Tox *m)
     pthread_mutex_lock(&Winthread.lock);
     a->alert = WINDOW_ALERT_NONE;
     a->pending_messages = 0;
-    bool flag_refresh = Winthread.flag_refresh;
+    const bool flag_refresh = Winthread.flag_refresh;
     pthread_mutex_unlock(&Winthread.lock);
 
     if (flag_refresh) {
         touchwin(a->window);
-        a->onDraw(a, m);
+        a->onDraw(a, toxic);
         wrefresh(a->window);
     }
 
 #ifdef AUDIO
     else if (a->is_call && timed_out(a->chatwin->infobox.lastupdate, 1)) {
         touchwin(a->window);
-        a->onDraw(a, m);
+        a->onDraw(a, toxic);
         wrefresh(a->window);
     }
 
@@ -821,7 +1285,7 @@ void draw_active_window(Tox *m)
     if (a->type == WINDOW_TYPE_GAME) {
         if (!flag_refresh) {  // we always want to be continously refreshing game windows
             touchwin(a->window);
-            a->onDraw(a, m);
+            a->onDraw(a, toxic);
             wrefresh(a->window);
         }
 
@@ -835,11 +1299,11 @@ void draw_active_window(Tox *m)
         flag_interface_refresh();
         pthread_mutex_unlock(&Winthread.lock);
 
-        if (ch == user_settings->key_next_tab || ch == user_settings->key_prev_tab) {
-            set_next_window(ch);
+        if (ch == c_config->key_next_tab || ch == c_config->key_prev_tab) {
+            set_next_window(windows, c_config, ch);
         }
 
-        a->onKey(a, m, ch, false);
+        a->onKey(a, toxic, ch, false);  // we lock only when necessary in the onKey callback
 
         return;
     }
@@ -857,19 +1321,20 @@ void draw_active_window(Tox *m)
     flag_interface_refresh();
     pthread_mutex_unlock(&Winthread.lock);
 
-    if (printable == 0 && (ch == user_settings->key_next_tab || ch == user_settings->key_prev_tab)) {
-        set_next_window((int) ch);
+    if (printable == 0 && (ch == c_config->key_next_tab || ch == c_config->key_prev_tab)) {
+        set_next_window(windows, c_config, (int) ch);
         return;
     } else if ((printable == 0) && (a->type != WINDOW_TYPE_FRIEND_LIST)) {
         pthread_mutex_lock(&Winthread.lock);
-        bool input_ret = a->onKey(a, m, ch, (bool) printable);
+        const bool input_ret = a->onKey(a, toxic, ch, (bool) printable);
         pthread_mutex_unlock(&Winthread.lock);
 
         if (input_ret) {
             return;
         }
 
-        // if an unprintable key code is unrecognized by input handler we attempt to manually decode char sequence
+        // if an unprintable key code is unrecognized by input handler we attempt to
+        // manually decode char sequence
         wint_t tmp = get_input_sequence_code();
 
         if (tmp != (wint_t) -1) {
@@ -878,46 +1343,49 @@ void draw_active_window(Tox *m)
     }
 
     pthread_mutex_lock(&Winthread.lock);
-    a->onKey(a, m, ch, (bool) printable);
+    a->onKey(a, toxic, ch, (bool) printable);
     pthread_mutex_unlock(&Winthread.lock);
 }
 
 /* Refresh inactive windows to prevent scrolling bugs.
  * Call at least once per second.
  */
-void refresh_inactive_windows(void)
+void refresh_inactive_windows(Windows *windows, const Client_Config *c_config)
 {
-    for (uint8_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        ToxWindow *toxwin = windows[i];
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *toxwin = windows->list[i];
 
         if (toxwin == NULL) {
             continue;
         }
 
-        if ((i != active_window_index) && (toxwin->type != WINDOW_TYPE_FRIEND_LIST)) {
+        if ((i != windows->active_index) && (toxwin->type != WINDOW_TYPE_FRIEND_LIST)) {
             pthread_mutex_lock(&Winthread.lock);
-            line_info_print(toxwin);
+            line_info_print(toxwin, c_config);
             pthread_mutex_unlock(&Winthread.lock);
         }
     }
 }
 
-/* Returns a pointer to the ToxWindow in the ith index.
+/* Returns a pointer to the ToxWindow associated with `id`.
  * Returns NULL if no ToxWindow exists.
  */
-ToxWindow *get_window_ptr(size_t index)
+ToxWindow *get_window_pointer_by_id(Windows *windows, uint16_t id)
 {
-    if (index >= MAX_WINDOWS_NUM) {
-        return NULL;
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->id == id) {
+            return w;
+        }
     }
 
-    return windows[index];
+    return NULL;
 }
 
-/* Returns a pointer to the currently active ToxWindow. */
-ToxWindow *get_active_window(void)
+ToxWindow *get_active_window(const Windows *windows)
 {
-    return windows[active_window_index];
+    return windows->active_index < windows->count ? windows->list[windows->active_index] : NULL;
 }
 
 void force_refresh(WINDOW *w)
@@ -927,18 +1395,13 @@ void force_refresh(WINDOW *w)
     refresh();
 }
 
-int get_num_active_windows(void)
-{
-    return num_active_windows;
-}
-
 /* Returns the number of active windows of given type. */
-size_t get_num_active_windows_type(WINDOW_TYPE type)
+uint16_t get_num_active_windows_type(const Windows *windows, Window_Type type)
 {
-    size_t count = 0;
+    uint16_t count = 0;
 
-    for (size_t i = 0; i < MAX_WINDOWS_NUM; ++i) {
-        ToxWindow *w = windows[i];
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
 
         if (w == NULL) {
             continue;
@@ -952,43 +1415,120 @@ size_t get_num_active_windows_type(WINDOW_TYPE type)
     return count;
 }
 
-/* destroys all chat and conference windows (should only be called on shutdown) */
-void kill_all_windows(Tox *m)
+ToxWindow *get_window_by_number_type(Windows *windows, uint32_t number, Window_Type type)
 {
-    for (size_t i = 2; i < MAX_WINDOWS_NUM; ++i) {
-        ToxWindow *w = windows[i];
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *win = windows->list[i];
 
-        if (w == NULL) {
-            continue;
+        if (win->type == type && win->num == number) {
+            return win;
         }
+    }
+
+    return NULL;
+}
+
+bool disable_window_log_by_number_type(Windows *windows, uint32_t number, Window_Type type)
+{
+    ToxWindow *win = get_window_by_number_type(windows, number, type);
+
+    if (win == NULL) {
+        return false;
+    }
+
+    ChatContext *ctx = win->chatwin;
+
+    if (ctx == NULL) {
+        return false;
+    }
+
+    log_disable(ctx->log);
+
+    return true;
+}
+
+bool enable_window_log_by_number_type(Windows *windows, uint32_t number, Window_Type type)
+{
+    ToxWindow *win = get_window_by_number_type(windows, number, type);
+
+    if (win == NULL) {
+        return false;
+    }
+
+    ChatContext *ctx = win->chatwin;
+
+    if (ctx == NULL) {
+        return false;
+    }
+
+    return log_enable(ctx->log) == 0;
+}
+
+void refresh_window_names(Toxic *toxic)
+{
+    Windows *windows = toxic->windows;
+
+    for (uint16_t i = 0; i < windows->count; ++i) {
+        ToxWindow *w = windows->list[i];
+
+        if (w->onNickRefresh != NULL) {
+            w->onNickRefresh(w, toxic);
+        }
+    }
+}
+
+/* destroys all chat and conference windows (should only be called on shutdown) */
+void kill_all_windows(Toxic *toxic)
+{
+    const Client_Config *c_config = toxic->c_config;
+    Windows *windows = toxic->windows;
+
+    uint16_t deleted = 0;
+    const uint16_t windows_count = windows->count;
+
+    while (windows->list != NULL && deleted++ < windows_count) {
+        ToxWindow *w = windows->list[0];
 
         switch (w->type) {
             case WINDOW_TYPE_CHAT: {
-                kill_chat_window(w, m);
+                kill_chat_window(w, toxic);
                 break;
             }
 
             case WINDOW_TYPE_CONFERENCE: {
-                free_conference(w, w->num);
+                free_conference(w, windows, c_config, w->num);
                 break;
             }
 
 #ifdef GAMES
 
             case WINDOW_TYPE_GAME: {
-                game_kill(w);
+                game_kill(w, windows, c_config);
                 break;
             }
 
 #endif // GAMES
 
+            case WINDOW_TYPE_GROUPCHAT: {
+                exit_groupchat(w, toxic, w->num, c_config->group_part_message,
+                               strlen(c_config->group_part_message));
+                break;
+            }
+
+            case WINDOW_TYPE_PROMPT: {
+                kill_prompt_window(w, windows, c_config);
+                break;
+            }
+
+            case WINDOW_TYPE_FRIEND_LIST: {
+                kill_friendlist(w, toxic->friends, toxic->blocked, windows, c_config);
+                break;
+            }
+
             default: {
+                fprintf(stderr, "attempting to kill unknown window type: %d\n", w->type);
                 break;
             }
         }
     }
-
-    /* TODO: use enum instead of magic indices */
-    kill_friendlist(windows[1]);
-    kill_prompt_window(windows[0]);
 }

@@ -1,24 +1,12 @@
 /*  autocomplete.c
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
+
+#include "autocomplete.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -38,17 +26,17 @@
 #include "toxic.h"
 #include "windows.h"
 
-static void print_ac_matches(ToxWindow *self, Tox *m, char **list, size_t n_matches)
+static void print_ac_matches(ToxWindow *self, Toxic *toxic, char **list, size_t n_matches, bool have_matches)
 {
-    if (m) {
-        execute(self->chatwin->history, self, m, "/clear", GLOBAL_COMMAND_MODE);
+    if (have_matches) {
+        execute(self->chatwin->history, self, toxic, "/clear", GLOBAL_COMMAND_MODE);
     }
 
     for (size_t i = 0; i < n_matches; ++i) {
-        line_info_add(self, false, NULL, NULL, SYS_MSG, 0, 0, "%s", list[i]);
+        line_info_add(self, toxic->c_config, false, NULL, NULL, SYS_MSG, 0, 0, "%s", list[i]);
     }
 
-    line_info_add(self, false, NULL, NULL, SYS_MSG, 0, 0, "");
+    line_info_add(self, toxic->c_config, false, NULL, NULL, SYS_MSG, 0, 0, " ");
 }
 
 /* puts match in match buffer. if more than one match, add first n chars that are identical.
@@ -56,7 +44,7 @@ static void print_ac_matches(ToxWindow *self, Tox *m, char **list, size_t n_matc
  *
  * Returns the length of the match.
  */
-static size_t get_str_match(ToxWindow *self, char *match, size_t match_sz, const char **matches, size_t n_items,
+static size_t get_str_match(ToxWindow *self, char *match, size_t match_sz, const char *const *matches, size_t n_items,
                             size_t max_size)
 {
     UNUSED_VAR(self);
@@ -91,12 +79,16 @@ static size_t get_str_match(ToxWindow *self, char *match, size_t match_sz, const
  *
  * dir_search should be true if the line being completed is a file path.
  *
+ * If `out` is non-null the input string will be copied to it. `out` must have room for at least
+ * MAX_STR_SIZE bytes.
+ *
  * Returns the difference between the old len and new len of line on success.
  * Returns -1 on error.
  *
  * Note: This function should not be called directly. Use complete_line() and complete_path() instead.
  */
-static int complete_line_helper(ToxWindow *self, const char **list, const size_t n_items, bool dir_search)
+static int complete_line_helper(ToxWindow *self, Toxic *toxic, const char *const *list, const size_t n_items,
+                                bool dir_search, char *out)
 {
     ChatContext *ctx = self->chatwin;
 
@@ -116,6 +108,14 @@ static int complete_line_helper(ToxWindow *self, const char **list, const size_t
         return -1;
     }
 
+    if (ubuf[0] == '/' && ubuf[1] == '\0') {
+        return -1;
+    }
+
+    if (out != NULL) {
+        snprintf(out, MAX_STR_SIZE, "%s", ubuf);
+    }
+
     /* isolate substring from space behind pos to pos */
     char tmp[MAX_STR_SIZE];
     memcpy(tmp, ubuf, ctx->pos);
@@ -125,7 +125,7 @@ static int complete_line_helper(ToxWindow *self, const char **list, const size_t
     char *sub = calloc(1, strlen(ubuf) + 1);
 
     if (sub == NULL) {
-        exit_toxic_err("failed in complete_line_helper", FATALERR_MEMORY);
+        return -1;
     }
 
     if (!s && !dir_search) {
@@ -152,7 +152,7 @@ static int complete_line_helper(ToxWindow *self, const char **list, const size_t
         return 0;
     }
 
-    int s_len = strlen(sub);
+    const int s_len = strlen(sub);
     size_t n_matches = 0;
 
     char **matches = (char **) malloc_ptr_array(n_items, MAX_STR_SIZE);
@@ -177,11 +177,12 @@ static int complete_line_helper(ToxWindow *self, const char **list, const size_t
     }
 
     if (!dir_search && n_matches > 1) {
-        print_ac_matches(self, NULL, matches, n_matches);
+        print_ac_matches(self, toxic, matches, n_matches, false);
     }
 
     char match[MAX_STR_SIZE];
-    size_t match_len = get_str_match(self, match, sizeof(match), (const char **) matches, n_matches, MAX_STR_SIZE);
+    const size_t match_len = get_str_match(self, match, sizeof(match), (const char *const *) matches,
+                                           n_matches, MAX_STR_SIZE);
 
     free_ptr_array((void **) matches);
 
@@ -200,8 +201,8 @@ static int complete_line_helper(ToxWindow *self, const char **list, const size_t
     }
 
     /* put match in correct spot in buf and append endchars */
-    int n_endchrs = strlen(endchrs);
-    int strt = ctx->pos - s_len;
+    const int n_endchrs = strlen(endchrs);
+    const int strt = ctx->pos - s_len;
     int diff = match_len - s_len + n_endchrs;
 
     if (ctx->len + diff >= MAX_STR_SIZE) {
@@ -259,29 +260,90 @@ static int complete_line_helper(ToxWindow *self, const char **list, const size_t
     return diff;
 }
 
-int complete_line(ToxWindow *self, const char **list, size_t n_items)
+static const char *const color_list[] = {
+    "black",
+    "blue",
+    "brown",
+    "cyan",
+    "gray",
+    "green",
+    "magenta",
+    "orange",
+    "pink",
+    "red",
+    "white",
+    "yellow",
+};
+
+static const char *const game_list[] = {
+    "centipede",
+    "chess",
+    "life",
+    "snake",
+};
+
+static const char *const status_list[] = {
+    "away",
+    "busy",
+    "online",
+};
+
+/*
+ * Attempts to auto-complete the argumemt for a string `input` that begins with a valid
+ * command, per the above lists.
+ *
+ * Returns the diff between the old len and new len of the line on success.
+ * Returns -1 on failure.
+ */
+static int complete_line_command_arg(ToxWindow *self, Toxic *toxic, const char *input)
 {
-    return complete_line_helper(self, list, n_items, false);
+    if (strncmp(input, "/status", strlen("/status")) == 0) {
+        return complete_line_helper(self, toxic, status_list, sizeof(status_list) / sizeof(char *), false, NULL);
+    }
+
+    if (strncmp(input, "/game", strlen("/game")) == 0) {
+        return complete_line_helper(self, toxic, game_list, sizeof(game_list) / sizeof(char *), false, NULL);
+    }
+
+    if (strncmp(input, "/color", strlen("/color")) == 0) {
+        return complete_line_helper(self, toxic, color_list, sizeof(color_list) / sizeof(char *), false, NULL);
+    }
+
+    return -1;
 }
 
-static int complete_path(ToxWindow *self, const char **list, const size_t n_items)
+int complete_line(ToxWindow *self, Toxic *toxic, const char *const *list, size_t n_items)
 {
-    return complete_line_helper(self, list, n_items, true);
+    char cmd[MAX_STR_SIZE] = {0};
+
+    const int ret = complete_line_helper(self, toxic, list, n_items, false, cmd);
+
+    if (ret >= 0) {
+        return ret;
+    }
+
+    return complete_line_command_arg(self, toxic, cmd);
+}
+
+static int complete_path(ToxWindow *self, Toxic *toxic, const char *const *list, const size_t n_items)
+{
+    return complete_line_helper(self, toxic, list, n_items, true, NULL);
 }
 
 /* Transforms a tab complete starting with the shorthand "~" into the full home directory. */
-static void complete_home_dir(ToxWindow *self, char *path, int pathsize, const char *cmd, int cmdlen)
+static void complete_home_dir(ToxWindow *self, const Paths *paths, char *path, int pathsize,
+                              const char *cmd, int cmdlen)
 {
     ChatContext *ctx = self->chatwin;
 
-    char homedir[MAX_STR_SIZE] = {0};
-    get_home_dir(homedir, sizeof(homedir));
+    char homedir[TOXIC_MAX_PATH_LENGTH] = {0};
+    get_home_dir(paths, homedir, sizeof(homedir));
 
-    char newline[MAX_STR_SIZE + 1];
+    char newline[MAX_STR_SIZE + TOXIC_MAX_PATH_LENGTH];
     snprintf(newline, sizeof(newline), "%s %s%s", cmd, homedir, path + 1);
     snprintf(path, pathsize, "%s", &newline[cmdlen - 1]);
 
-    wchar_t wline[MAX_STR_SIZE];
+    wchar_t wline[MAX_STR_SIZE + TOXIC_MAX_PATH_LENGTH];
 
     if (mbs_to_wcs_buf(wline, newline, sizeof(wline) / sizeof(wchar_t)) == -1) {
         return;
@@ -317,10 +379,10 @@ static bool is_partial_match(const char *s, const char *p, size_t p_len)
  * Returns -1 if no matches or more than one match.
  */
 #define MAX_DIRS 75
-int dir_match(ToxWindow *self, Tox *m, const wchar_t *line, const wchar_t *cmd)
+int dir_match(ToxWindow *self, Toxic *toxic, const wchar_t *line, const wchar_t *cmd)
 {
-    char b_path[MAX_STR_SIZE + 1];
-    char b_name[MAX_STR_SIZE + 1];
+    char b_path[TOXIC_MAX_PATH_LENGTH + 1];
+    char b_name[TOXIC_MAX_PATH_LENGTH + 1];
     char b_cmd[MAX_STR_SIZE];
     const wchar_t *tmpline = &line[wcslen(cmd) + 1];   /* start after "/command " */
 
@@ -333,7 +395,7 @@ int dir_match(ToxWindow *self, Tox *m, const wchar_t *line, const wchar_t *cmd)
     }
 
     if (b_path[0] == '~') {
-        complete_home_dir(self, b_path, sizeof(b_path) - 1, b_cmd, strlen(b_cmd) + 2);
+        complete_home_dir(self, toxic->paths, b_path, sizeof(b_path) - 1, b_cmd, strlen(b_cmd) + 2);
     }
 
     int si = char_rfind(b_path, '/', strlen(b_path));
@@ -382,10 +444,10 @@ int dir_match(ToxWindow *self, Tox *m, const wchar_t *line, const wchar_t *cmd)
 
     if (dircount > 1) {
         qsort(dirnames, dircount, sizeof(char *), qsort_ptr_char_array_helper);
-        print_ac_matches(self, m, dirnames, dircount);
+        print_ac_matches(self, toxic, dirnames, dircount, true);
     }
 
-    int ret = complete_path(self, (const char **) dirnames, dircount);
+    const int ret = complete_path(self, toxic, (const char *const *) dirnames, dircount);
 
     free_ptr_array((void **) dirnames);
 

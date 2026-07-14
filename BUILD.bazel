@@ -1,49 +1,125 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//tools/project:build_defs.bzl", "project")
 
-project()
+project(license = "gpl3-https")
 
-cc_binary(
-    name = "toxic",
+AV_SRCS = [
+    "src/audio*.c",
+    "src/video*.c",
+    "src/x11*.c",
+]
+
+COPTS = [
+    "-D_DEFAULT_SOURCE",
+    "-DGAMES",
+    "-DHAVE_WIDECHAR",
+    "-DPACKAGE_DATADIR='\"data\"'",
+    "-DQRCODE",
+] + select({
+    "//tools/config:linux-x86_64": [
+        "-DAUDIO",
+        "-DVIDEO",
+        "-DTOX_EXPERIMENTAL",
+    ],
+    "//conditions:default": [],
+}) + select({
+    "//tools/config:linux-x86_64": ["-DPYTHON"],
+    "//tools/config:linux-x86_64-no-python": [],
+    "//conditions:default": [],
+})
+
+cc_library(
+    name = "libtoxic",
     srcs = glob(
         [
             "src/*.c",
             "src/*.h",
         ],
-        exclude = ["src/video*"],
+        exclude = ["src/main.c"] + AV_SRCS,
     ) + select({
-        "//tools/config:linux": glob(["src/video*"]),
-        "//tools/config:osx": [],
+        "//tools/config:linux-x86_64": glob(AV_SRCS),
+        "//conditions:default": [],
     }),
-    copts = [
-        "-std=gnu99",
-        "-DAUDIO",
-        "-DGAMES",
-        "-DPACKAGE_DATADIR='\"data\"'",
-        "-DPYTHON",
-        "-DQRCODE",
-    ] + select({
-        "//tools/config:linux": ["-DVIDEO"],
-        "//tools/config:osx": [],
-    }),
+    hdrs = glob(["src/*.h"]),
+    copts = COPTS,
+    tags = ["no-windows"],
     deps = [
         "//c-toxcore",
         "@curl",
         "@libconfig",
         "@libqrencode",
-        "@libvpx",
         "@ncurses",
-        "@openal",
-        "@python3//:python",
     ] + select({
-        "//tools/config:linux": ["@x11"],
-        "//tools/config:osx": [],
+        "//tools/config:linux-x86_64": [
+            "@libvpx",
+            "@openal",
+            "@x11",
+            "@xproto",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//tools/config:linux-x86_64": ["@python3//:python"],
+        "//tools/config:linux-x86_64-no-python": [],
+        "//conditions:default": [],
+    }),
+)
+
+cc_binary(
+    name = "toxic",
+    srcs = ["src/main.c"],
+    copts = COPTS,
+    tags = ["no-windows"],
+    deps = [
+        ":libtoxic",
+        "//c-toxcore",
+        "@curl",
+        "@libconfig",
+        "@libqrencode",
+        "@ncurses",
+    ] + select({
+        "//tools/config:linux-x86_64": [
+            "@libvpx",
+            "@openal",
+            "@x11",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//tools/config:linux-x86_64": ["@python3//:python"],
+        "//tools/config:linux-x86_64-no-python": [],
+        "//conditions:default": [],
     }),
 )
 
 sh_test(
     name = "toxic_test",
+    size = "small",
     srcs = [":toxic"],
     args = ["--help"],
+    tags = ["no-windows"],
+)
+
+cc_test(
+    name = "line_info_test",
     size = "small",
+    srcs = ["src/line_info_test.cc"],
+    linkstatic = True,
+    tags = ["no-windows"],
+    deps = [
+        ":libtoxic",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "misc_tools_test",
+    size = "small",
+    srcs = ["src/misc_tools_test.cc"],
+    linkstatic = True,
+    tags = ["no-windows"],
+    deps = [
+        ":libtoxic",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+    ],
 )

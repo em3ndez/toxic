@@ -1,23 +1,9 @@
 /*  help.c
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <string.h>
@@ -32,9 +18,9 @@
 #endif /* PYTHON */
 
 #ifdef PYTHON
-#define HELP_MENU_HEIGHT 10
+#define HELP_MENU_HEIGHT 11
 #else
-#define HELP_MENU_HEIGHT 9
+#define HELP_MENU_HEIGHT 10
 #endif /* PYTHON */
 #define HELP_MENU_WIDTH 26
 
@@ -110,6 +96,12 @@ static void help_draw_menu(ToxWindow *self)
     wattroff(win, A_BOLD | COLOR_PAIR(BLUE));
     wprintw(win, "nference commands\n");
 
+    wprintw(win, " g");
+    wattron(win, A_BOLD | COLOR_PAIR(BLUE));
+    wprintw(win, "r");
+    wattroff(win, A_BOLD | COLOR_PAIR(BLUE));
+    wprintw(win, "oupchat commands\n");
+
 #ifdef PYTHON
     wattron(win, A_BOLD | COLOR_PAIR(BLUE));
     wprintw(win, " p");
@@ -171,23 +163,26 @@ static void help_draw_global(ToxWindow *self)
     wprintw(win, "  /add <addr> <msg>          : Add contact with optional message\n");
     wprintw(win, "  /accept <id>               : Accept friend request\n");
     wprintw(win, "  /avatar <path>             : Set an avatar (leave path empty to unset)\n");
+    wprintw(win, "  /color <color>             : Change the colour of the focused window's name\n");
+    wprintw(win, "  /conference <type>         : Create a conference where type: text | audio\n");
+    wprintw(win, "  /connect <ip> <port> <key> : Manually connect to a DHT node\n");
     wprintw(win, "  /decline <id>              : Decline friend request\n");
     wprintw(win, "  /requests                  : List pending friend requests\n");
-    wprintw(win, "  /connect <ip> <port> <key> : Manually connect to a DHT node\n");
     wprintw(win, "  /status <type>             : Set status (Online, Busy, Away)\n");
     wprintw(win, "  /note <msg>                : Set a personal note\n");
-    wprintw(win, "  /nick <nick>               : Set your nickname\n");
+    wprintw(win, "  /nick <name>               : Set your global name (doesn't affect groups)\n");
     wprintw(win, "  /nospam <value>            : Change part of your Tox ID to stop spam\n");
-    wprintw(win, "  /log <on> or <off>         : Enable/disable logging\n");
-    wprintw(win, "  /conference <type>         : Create a conference where type: text | audio\n");
+    wprintw(win, "  /log <on>|<off>            : Enable/disable logging\n");
     wprintw(win, "  /myid                      : Print your Tox ID\n");
+    wprintw(win, "  /group <name>              : Create a new group chat\n");
+    wprintw(win, "  /join <chatid>             : Join a public groupchat using a Chat ID\n");
 #ifdef GAMES
-    wprintw(win, "  /game                      : Play a game\n");
+    wprintw(win, "  /game <name>               : Play a game\n");
 #endif /* GAMES */
 
 #ifdef QRCODE
 #ifdef QRPNG
-    wprintw(win, "  /myqr <txt> or <png>       : Print your Tox ID's QR code to a file.\n");
+    wprintw(win, "  /myqr <txt>|<png>          : Print your Tox ID's QR code to a file.\n");
 #else
     wprintw(win, "  /myqr                      : Print your Tox ID's QR code to a file.\n");
 #endif /* QRPNG */
@@ -238,11 +233,18 @@ static void help_draw_chat(ToxWindow *self)
     wprintw(win, "Chat Commands:\n");
     wattroff(win, A_BOLD | COLOR_PAIR(RED));
 
-    wprintw(win, "  /invite <n>                : Invite contact to a conference \n");
-    wprintw(win, "  /join                      : Join a pending conference\n");
+    wprintw(win, "  /autoaccept <on>|<off>     : Toggle auto-accepting file transfers\n");
+    wprintw(win, "  /cinvite <conference num>  : Invite contact to a conference \n");
+    wprintw(win, "  /cjoin                     : Join a pending conference\n");
+    wprintw(win, "  /invite <group num>        : Invite contact to a groupchat \n");
+    wprintw(win, "  /gaccept <password>        : Accept a pending groupchat invite\n");
     wprintw(win, "  /sendfile <path>           : Send a file\n");
     wprintw(win, "  /savefile <id>             : Receive a file\n");
     wprintw(win, "  /cancel <type> <id>        : Cancel file transfer where type: in|out\n");
+
+#ifdef GAMES
+    wprintw(win, "  /game <name>               : Play a game with this contact\n");
+#endif /* GAMES */
 
 #ifdef AUDIO
     wattron(win, A_BOLD);
@@ -268,9 +270,45 @@ static void help_draw_chat(ToxWindow *self)
     wprintw(win, "  /video                     : Toggle video in call\n");
 #endif /* VIDEO */
 
-#ifdef GAMES
-    wprintw(win, "  /game                      : Play a game with contact\n");
-#endif /* GAMES */
+    help_draw_bottom_menu(win);
+
+    box(win, ACS_VLINE, ACS_HLINE);
+    wnoutrefresh(win);
+}
+
+static void help_draw_groupchats(ToxWindow *self)
+{
+    WINDOW *win = self->help->win;
+
+    wmove(win, 1, 1);
+
+    wattron(win, A_BOLD | COLOR_PAIR(RED));
+    wprintw(win, "Groupchat commands:\n");
+    wattroff(win, A_BOLD | COLOR_PAIR(RED));
+
+    wprintw(win, "  /chatid                   : Print this group's ID\n");
+    wprintw(win, "  /close <m>                : Leave the group with an optional part message\n");
+    wprintw(win, "  /disconnect               : Disconnect from the group (credentials retained)\n");
+    wprintw(win, "  /ignore <name>|<key>      : Ignore a peer\n");
+    wprintw(win, "  /unignore <name>|<key>    : Unignore a peer\n");
+    wprintw(win, "  /invite <name>            : Invite a friend to the group\n");
+    wprintw(win, "  /kick <name>|<key>        : Remove a peer from the group\n");
+    wprintw(win, "  /list                     : Print a list of peers currently in the group\n");
+    wprintw(win, "  /locktopic                : Set the topic lock: on | off\n");
+    wprintw(win, "  /mod <name>|<key>         : Promote a peer to moderator\n");
+    wprintw(win, "  /nick <name>              : Set your name (for this group only)\n");
+    wprintw(win, "  /passwd <password>        : Set a password to join the group\n");
+    wprintw(win, "  /peerlimit <n>            : Set the maximum number of peers that can join\n");
+    wprintw(win, "  /privacy <state>          : Set the privacy state: private | public\n");
+    wprintw(win, "  /rejoin <password>        : Reconnect to the group (password is optional)\n");
+    wprintw(win, "  /silence <name>|<key>     : Silence a peer for the entire group\n");
+    wprintw(win, "  /unsilence <name>|<key>   : Unsilence a silenced peer\n");
+    wprintw(win, "  /status <type>            : Set your status (client-wide)\n");
+    wprintw(win, "  /topic <m>                : Set the topic\n");
+    wprintw(win, "  /unmod <name>|<key>       : Demote a moderator\n");
+    wprintw(win, "  /voice <state>            : Set the voice state: all | mod | founder\n");
+    wprintw(win, "  /whisper <name>|<key> <m> : Send a private message to a peer\n");
+    wprintw(win, "  /whois <name>|<key>       : Display whois info for a peer\n");
 
     help_draw_bottom_menu(win);
 
@@ -292,11 +330,12 @@ static void help_draw_keys(ToxWindow *self)
     wprintw(win, "  Page Up and Page Down     : Scroll window history one line\n");
     wprintw(win, "  Ctrl+F and Ctrl+V         : Scroll window history half a page\n");
     wprintw(win, "  Ctrl+H                    : Move to the bottom of window history\n");
-    wprintw(win, "  Ctrl+up and Ctrl+down     : Scroll peer list in conference\n");
-    wprintw(win, "  Ctrl+B                    : Toggle the conference peerlist\n");
+    wprintw(win, "  Ctrl+up and Ctrl+down     : Scroll groupchat/conference peer list\n");
+    wprintw(win, "  Ctrl+B                    : Toggle groupchat/conference peer list\n");
     wprintw(win, "  Ctrl+J                    : Insert new line\n");
-    wprintw(win, "  Ctrl+T                    : Toggle paste mode\n\n");
-    wprintw(win, "  (Note: Custom keybindings override these defaults.)\n\n");
+    wprintw(win, "  Ctrl+T                    : Toggle paste mode\n");
+    wprintw(win, "  Ctrl+R                    : Reload the Toxic config file\n\n");
+    wprintw(win, "  (Note: Custom keybindings override these defaults.)\n");
 
     help_draw_bottom_menu(win);
 
@@ -314,16 +353,18 @@ static void help_draw_conference(ToxWindow *self)
     wprintw(win, "Conference commands:\n");
     wattroff(win, A_BOLD | COLOR_PAIR(RED));
 
-    wprintw(win, "  /title <msg>               : Show/set conference title\n");
+    wprintw(win, "  /chatid                 : Print this conference's ID\n");
+    wprintw(win, "  /cinvite                : Invite a friend to this conference\n");
+    wprintw(win, "  /title <msg>            : Show/set conference title\n");
 #ifdef AUDIO
     wattron(win, A_BOLD);
     wprintw(win, "\n Audio:\n");
     wattroff(win, A_BOLD);
-    wprintw(win, "  /audio <on> or <off>       : Enable/disable audio in an audio conference\n");
-    wprintw(win, "  /mute                      : Toggle self audio mute status\n");
-    wprintw(win, "  /mute <nick> or <pubkey>   : Toggle peer audio mute status\n");
-    wprintw(win, "  /ptt <on> or <off>         : Toggle audio input Push-To-Talk (F2 to activate)\n");
-    wprintw(win, "  /sense <n>                 : VAD sensitivity threshold\n\n");
+    wprintw(win, "  /audio <on>|<off>       : Enable/disable audio in an audio conference\n");
+    wprintw(win, "  /mute                   : Toggle self audio mute status\n");
+    wprintw(win, "  /mute <nick>|<pubkey>   : Toggle peer audio mute status\n");
+    wprintw(win, "  /ptt <on>|<off>         : Toggle audio input Push-To-Talk (F2 to activate)\n");
+    wprintw(win, "  /sense <n>              : VAD sensitivity threshold\n\n");
 #endif
 
     help_draw_bottom_menu(win);
@@ -350,6 +391,7 @@ static void help_draw_plugin(ToxWindow *self)
     box(win, ACS_VLINE, ACS_HLINE);
     wnoutrefresh(win);
 }
+
 #endif /* PYTHON */
 
 static void help_draw_contacts(ToxWindow *self)
@@ -385,18 +427,21 @@ void help_onKey(ToxWindow *self, wint_t key)
             break;
 
         case L'c':
+            height = 13;
 #ifdef VIDEO
-            help_init_window(self, 26, 80);
+            height += 15;
 #elif AUDIO
-            help_init_window(self, 21, 80);
-#else
-            help_init_window(self, 11, 80);
+            height += 5;
 #endif
+#ifdef GAMES
+            height += 1;
+#endif
+            help_init_window(self, height, 80);
             self->help->type = HELP_CHAT;
             break;
 
         case L'g':
-            height = 22;
+            height = 25;
 #ifdef VIDEO
             height += 8;
 #elif AUDIO
@@ -413,7 +458,7 @@ void help_onKey(ToxWindow *self, wint_t key)
             break;
 
         case L'o':
-            height = 6;
+            height = 8;
 #ifdef AUDIO
             height += 7;
 #endif
@@ -435,7 +480,7 @@ void help_onKey(ToxWindow *self, wint_t key)
             break;
 
         case L'k':
-            help_init_window(self, 15, 80);
+            help_init_window(self, 16, 80);
             self->help->type = HELP_KEYS;
             break;
 
@@ -443,10 +488,15 @@ void help_onKey(ToxWindow *self, wint_t key)
             help_init_menu(self);
             self->help->type = HELP_MENU;
             break;
+
+        case L'r':
+            help_init_window(self, 28, 80);
+            self->help->type = HELP_GROUP;
+            break;
     }
 }
 
-void help_onDraw(ToxWindow *self)
+void help_draw_main(ToxWindow *self)
 {
     switch (self->help->type) {
         case HELP_MENU:
@@ -479,5 +529,9 @@ void help_onDraw(ToxWindow *self)
             help_draw_plugin(self);
             break;
 #endif /* PYTHON */
+
+        case HELP_GROUP:
+            help_draw_groupchats(self);
+            break;
     }
 }

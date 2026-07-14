@@ -1,28 +1,15 @@
 /*  autocomplete.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef AUTOCOMPLETE_H
 #define AUTOCOMPLETE_H
 
+#include "toxic.h"
 #include "windows.h"
 
 /*
@@ -39,7 +26,7 @@
  *
  * Note: This function should not be called directly. Use complete_line() and complete_path() instead.
  */
-int complete_line(ToxWindow *self, const char **list, size_t n_items);
+int complete_line(ToxWindow *self, Toxic *toxic, const char *const *list, size_t n_items);
 
 /* Attempts to match /command "<incomplete-dir>" line to matching directories.
  * If there is only one match the line is auto-completed.
@@ -47,6 +34,6 @@ int complete_line(ToxWindow *self, const char **list, size_t n_items);
  * Returns the diff between old len and new len of ctx->line on success.
  * Returns -1 if no matches or more than one match.
  */
-int dir_match(ToxWindow *self, Tox *m, const wchar_t *line, const wchar_t *cmd);
+int dir_match(ToxWindow *self, Toxic *toxic, const wchar_t *line, const wchar_t *cmd);
 
 #endif /* AUTOCOMPLETE_H */

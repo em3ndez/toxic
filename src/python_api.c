@@ -1,32 +1,22 @@
 /*  python_api.c
  *
- *
  *  Copyright (C) 2017 Jakob Kreuze <jakob@memeware.net>
+ *  Copyright (C) 2017-2026 Toxic All Rights Reserved.
  *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
+
+#include "python_api.h"
+
+#include "api.h"
+#include "toxic.h"
+#include "execute.h"
 
 #ifdef PYTHON
 #include <Python.h>
-#include "api.h"
 
-#include "execute.h"
-
-extern Tox       *user_tox;
+extern Toxic       *user_toxic;
 
 static struct python_registered_func {
     char     *name;
@@ -170,11 +160,12 @@ static PyObject *python_api_register(PyObject *self, PyObject *args)
     PyObject   *callback;
 
     if (!PyArg_ParseTuple(args, "ssO:register_command", &command, &help, &callback)) {
+        PyErr_SetString(PyExc_TypeError, "Failed to parse PyArg tuple");
         return NULL;
     }
 
     if (!PyCallable_Check(callback)) {
-        PyErr_SetString(PyExc_TypeError, "Calback parameter must be callable");
+        PyErr_SetString(PyExc_TypeError, "Callback parameter must be callable");
         return NULL;
     }
 
@@ -217,6 +208,19 @@ static PyObject *python_api_register(PyObject *self, PyObject *args)
             strncpy(cur->next->help, help, help_len + 1);
             cur->next->callback = callback;
             cur->next->next     = NULL;
+
+            const size_t msg_len = command_len + 64;
+            char *msg = malloc(msg_len);
+
+            if (msg == NULL) {
+                break;
+            }
+
+            snprintf(msg, msg_len, "Registered command: \"%s\"", command);
+            api_display(msg);
+
+            free(msg);
+
             break;
         }
     }
@@ -231,7 +235,7 @@ static PyMethodDef ToxicApiMethods[] = {
     {"get_status",         python_api_get_status,         METH_VARARGS, "Returns the user's current status"},
     {"get_status_message", python_api_get_status_message, METH_VARARGS, "Return the user's current status message"},
     {"get_all_friends",    python_api_get_all_friends,    METH_VARARGS, "Return all of the user's friends"},
-    {"send",               python_api_send,               METH_VARARGS, "Send the message to the current user"},
+    {"send",               python_api_send,               METH_VARARGS, "Send a message to the friend of current window"},
     {"execute",            python_api_execute,            METH_VARARGS, "Execute a command like `/nick`"},
     {"register",           python_api_register,           METH_VARARGS, "Register a command like `/nick` to a Python function"},
     {NULL,                 NULL,                          0,            NULL},
@@ -251,20 +255,21 @@ PyMODINIT_FUNC PyInit_toxic_api(void)
     PyObject *global_command_const    = Py_BuildValue("i", GLOBAL_COMMAND_MODE);
     PyObject *chat_command_const      = Py_BuildValue("i", CHAT_COMMAND_MODE);
     PyObject *conference_command_const = Py_BuildValue("i", CONFERENCE_COMMAND_MODE);
+    PyObject *groupchat_command_const = Py_BuildValue("i", GROUPCHAT_COMMAND_MODE);
     PyObject_SetAttrString(m, "GLOBAL_COMMAND",    global_command_const);
     PyObject_SetAttrString(m, "CHAT_COMMAND",      chat_command_const);
     PyObject_SetAttrString(m, "CONFERENCE_COMMAND", conference_command_const);
+    PyObject_SetAttrString(m, "GROUPCHAT_COMMAND", groupchat_command_const);
     Py_DECREF(global_command_const);
     Py_DECREF(chat_command_const);
     Py_DECREF(conference_command_const);
+    Py_DECREF(groupchat_command_const);
     return m;
 }
 
 void terminate_python(void)
 {
-    if (python_commands.name != NULL) {
-        free(python_commands.name);
-    }
+    free(python_commands.name);
 
     struct python_registered_func *cur = NULL;
 
@@ -278,20 +283,29 @@ void terminate_python(void)
     Py_Finalize();
 }
 
-void init_python(Tox *m)
+void init_python(Toxic *toxic)
 {
-    user_tox = m;
+    user_toxic = toxic;
     PyImport_AppendInittab("toxic_api", PyInit_toxic_api);
     Py_Initialize();
+    PyEval_SaveThread();
 }
 
-void run_python(FILE *fp, char *path)
+void run_python(FILE *fp, const char *path)
 {
+    PyGILState_STATE gstate = PyGILState_Ensure();
+
     PyRun_SimpleFile(fp, path);
+
+    PyGILState_Release(gstate);
 }
 
 int do_python_command(int num_args, char (*args)[MAX_STR_SIZE])
 {
+    if (num_args <= 0) {
+        return -1;
+    }
+
     int i;
     PyObject *callback_args, *args_strings;
     struct python_registered_func *cur;
@@ -302,6 +316,8 @@ int do_python_command(int num_args, char (*args)[MAX_STR_SIZE])
         }
 
         if (!strcmp(args[0], cur->name)) {
+            PyGILState_STATE gstate = PyGILState_Ensure();
+
             args_strings = PyList_New(0);
 
             for (i = 1; i < num_args; i++) {
@@ -313,6 +329,8 @@ int do_python_command(int num_args, char (*args)[MAX_STR_SIZE])
             if (PyObject_CallObject(cur->callback, callback_args) == NULL) {
                 api_display("Exception raised in callback function");
             }
+
+            PyGILState_Release(gstate);
 
             return 0;
         }
@@ -362,4 +380,5 @@ void python_draw_handler_help(WINDOW *win)
         }
     }
 }
+
 #endif /* PYTHON */

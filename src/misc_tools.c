@@ -1,25 +1,16 @@
 /*  misc_tools.c
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE    /* needed for strcasestr() */
+#endif
+
+#include <assert.h>
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <limits.h>
@@ -29,13 +20,11 @@
 #include <time.h>
 
 #include "file_transfers.h"
+#include "friendlist.h"
 #include "misc_tools.h"
 #include "settings.h"
 #include "toxic.h"
 #include "windows.h"
-
-extern ToxWindow *prompt;
-extern struct user_settings *user_settings;
 
 void clear_screen(void)
 {
@@ -77,8 +66,8 @@ void sleep_thread(long int usec)
     struct timespec req;
     struct timespec rem;
 
-    req.tv_sec = 0;
-    req.tv_nsec = usec * 1000L;
+    req.tv_sec = usec / (1000L * 1000L);
+    req.tv_nsec = (usec - (req.tv_sec * 1000L * 1000L)) * 1000L;
 
     if (nanosleep(&req, &rem) == -1) {
         if (nanosleep(&rem, NULL) == -1) {
@@ -96,43 +85,60 @@ struct tm *get_time(void)
     return timeinfo;
 }
 
-/* Puts the current time in buf in the format of specified by the config */
-void get_time_str(char *buf, size_t bufsize)
+void get_time_str(char *buf, size_t bufsize, const char *format_string)
 {
     if (buf == NULL || bufsize == 0) {
         return;
     }
 
-    *buf = 0;
-
-    if (user_settings->timestamps == TIMESTAMPS_OFF) {
+    if (format_time_str(buf, bufsize, format_string, get_time()) > 0) {
         return;
     }
 
-    const char *t = user_settings->timestamp_format;
-
-    if (strftime(buf, bufsize, t, get_time()) == 0) {
-        strftime(buf, bufsize, TIMESTAMP_DEFAULT, get_time());
+    if (format_time_str(buf, bufsize, TIMESTAMP_DEFAULT, get_time()) > 0) {
+        return;
     }
+
+    buf[0] = '\0';
 }
 
-/* Converts seconds to string in format HH:mm:ss; truncates hours and minutes when necessary */
-void get_elapsed_time_str(char *buf, int bufsize, time_t secs)
+void get_elapsed_time_str(char *buf, int bufsize, uint64_t elapsed_seconds)
 {
-    if (!secs) {
+    if (elapsed_seconds == 0) {
+        snprintf(buf, bufsize, "<Invalid time format>");
         return;
     }
 
-    long int seconds = secs % 60;
-    long int minutes = (secs % 3600) / 60;
-    long int hours = secs / 3600;
+    long int seconds = elapsed_seconds % 60;
+    long int minutes = (elapsed_seconds % 3600) / 60;
+    long int hours = elapsed_seconds / 3600;
 
-    if (!minutes && !hours) {
+    if (minutes == 0 && hours == 0) {
         snprintf(buf, bufsize, "%.2ld", seconds);
-    } else if (!hours) {
+    } else if (hours == 0) {
         snprintf(buf, bufsize, "%ld:%.2ld", minutes, seconds);
     } else {
         snprintf(buf, bufsize, "%ld:%.2ld:%.2ld", hours, minutes, seconds);
+    }
+}
+
+void get_elapsed_time_str_alt(char *buf, int bufsize, uint64_t elapsed_seconds)
+{
+    if (elapsed_seconds == 0) {
+        snprintf(buf, bufsize, "<Invalid time format>");
+        return;
+    }
+
+    long int seconds = elapsed_seconds % 60;
+    long int minutes = (elapsed_seconds % 3600) / 60;
+    long int hours = elapsed_seconds / 3600;
+
+    if (minutes == 0 && hours == 0) {
+        snprintf(buf, bufsize, "%ld seconds", seconds);
+    } else if (hours == 0) {
+        snprintf(buf, bufsize, "%ld minutes, %ld seconds", minutes, seconds);
+    } else {
+        snprintf(buf, bufsize, "%ld hours, %ld minutes, %ld seconds", hours, minutes, seconds);
     }
 }
 
@@ -247,7 +253,6 @@ int wstring_is_empty(const wchar_t *string)
     return string[0] == L'\0';
 }
 
-/* convert a multibyte string to a wide character string and puts in buf. */
 int mbs_to_wcs_buf(wchar_t *buf, const char *string, size_t n)
 {
     size_t len = mbstowcs(NULL, string, 0) + 1;
@@ -263,7 +268,6 @@ int mbs_to_wcs_buf(wchar_t *buf, const char *string, size_t n)
     return len;
 }
 
-/* converts wide character string into a multibyte string and puts in buf. */
 int wcs_to_mbs_buf(char *buf, const wchar_t *string, size_t n)
 {
     size_t len = wcstombs(NULL, string, 0) + 1;
@@ -288,22 +292,48 @@ int qsort_strcasecmp_hlpr(const void *str1, const void *str2)
 /* case-insensitive string compare function for use with qsort */
 int qsort_ptr_char_array_helper(const void *str1, const void *str2)
 {
-    return strcasecmp(*(char **)str1, *(char **)str2);
+    return strcasecmp(*(const char *const *)str1, *(const char *const *)str2);
 }
 
-static const char invalid_chars[] = {'/', '\n', '\t', '\v', '\r', '\0'};
+struct qsort_r_data {
+    void *arg;
+    int (*compar)(const void *, const void *, void *);
+};
+
+#ifdef __APPLE__
+static int qsort_r_compar_apple(void *thunk, const void *a, const void *b)
+{
+    struct qsort_r_data *data = thunk;
+    return data->compar(a, b, data->arg);
+}
+
+#endif
+
+void toxic_qsort_r(void *base, size_t nmemb, size_t size,
+                   int (*compar)(const void *, const void *, void *),
+                   void *arg)
+{
+#if defined(__APPLE__)
+    struct qsort_r_data data = { arg, compar };
+    qsort_r(base, nmemb, size, &data, qsort_r_compar_apple);
+#else
+    qsort_r(base, nmemb, size, compar, arg);
+#endif
+}
+
+/* List of characters we don't allow in nicks. */
+static const char invalid_nick_chars[] = {':', '/', '\0', '\a', '\b', '\f', '\n', '\r', '\t', '\v'};
+
+/* List of characters we don't allow in single-line strings. */
+static const char invalid_string_chars[] = {'\0', '\a', '\b', '\f', '\n', '\r', '\t', '\v'};
 
 /*
- * Helper function for `valid_nick()`.
- *
- * Returns true if `ch` is not in the `invalid_chars` array.
+ * Returns true if the character `ch` is not in the supplied `invalid_chars` array.
  */
-static bool is_valid_char(char ch)
+static bool is_valid_char(char ch, const char *const invalid_chars, size_t list_length)
 {
-    char tmp;
-
-    for (size_t i = 0; (tmp = invalid_chars[i]); ++i) {
-        if (tmp == ch) {
+    for (size_t i = 0; i < list_length; ++i) {
+        if (invalid_chars[i] == ch) {
             return false;
         }
     }
@@ -311,25 +341,17 @@ static bool is_valid_char(char ch)
     return true;
 }
 
-/* Returns true if nick is valid.
- *
- * A valid toxic nick:
- * - cannot be empty
- * - cannot start with a space
- * - must not contain a forward slash (for logfile naming purposes)
- * - must not contain contiguous spaces
- * - must not contain a newline or tab seqeunce
- */
 bool valid_nick(const char *nick)
 {
     if (!nick[0] || nick[0] == ' ') {
         return false;
     }
 
-    for (size_t i = 0; nick[i]; ++i) {
+    for (size_t i = 0; nick[i] != '\0'; ++i) {
         char ch = nick[i];
 
-        if ((ch == ' ' && nick[i + 1] == ' ') || !is_valid_char(ch)) {
+        if ((ch == ' ' && nick[i + 1] == ' ')
+                || !is_valid_char(ch, invalid_nick_chars, sizeof(invalid_nick_chars))) {
             return false;
         }
     }
@@ -337,53 +359,53 @@ bool valid_nick(const char *nick)
     return true;
 }
 
-/* Converts all newline/tab chars to spaces (use for strings that should be contained to a single line) */
-void filter_str(char *str, size_t len)
+void filter_string(char *str, size_t len, bool is_nick)
 {
+    const char *const invalid_chars = is_nick ? invalid_nick_chars : invalid_string_chars;
+    const size_t list_length = is_nick ? sizeof(invalid_nick_chars) : sizeof(invalid_string_chars);
+
     for (size_t i = 0; i < len; ++i) {
         char ch = str[i];
 
-        if (!is_valid_char(ch) || str[i] == '\0') {
+        if (!is_valid_char(ch, invalid_chars, list_length)) {
             str[i] = ' ';
         }
     }
 }
 
-/* gets base file name from path or original file name if no path is supplied.
- * Returns the file name length
- */
-size_t get_file_name(char *namebuf, size_t bufsize, const char *pathname)
+int get_file_name(char *namebuf, size_t bufsize, const char *pathname)
 {
-    int len = strlen(pathname) - 1;
-    char *path = strdup(pathname);
-
-    if (path == NULL) {
-        exit_toxic_err("failed in get_file_name", FATALERR_MEMORY);
+    if (!pathname || bufsize == 0) {
+        return -1;
     }
 
-    while (len >= 0 && pathname[len] == '/') {
-        path[len--] = '\0';
+    const char *end = pathname + strlen(pathname);
+
+    while (end > pathname && *(end - 1) == '/') {
+        end--;
     }
 
-    char *finalname = strdup(path);
-
-    if (finalname == NULL) {
-        exit_toxic_err("failed in get_file_name", FATALERR_MEMORY);
+    if (end == pathname) {
+        namebuf[0] = '\0';
+        return 0;
     }
 
-    const char *basenm = strrchr(path, '/');
+    const char *start = end;
 
-    if (basenm != NULL) {
-        if (basenm[1]) {
-            strcpy(finalname, &basenm[1]);
-        }
+    while (start > pathname && *(start - 1) != '/') {
+        start--;
     }
 
-    snprintf(namebuf, bufsize, "%s", finalname);
-    free(finalname);
-    free(path);
+    size_t len = (size_t)(end - start);
 
-    return strlen(namebuf);
+    if (len >= bufsize) {
+        len = bufsize - 1;
+    }
+
+    memcpy(namebuf, start, len);
+    namebuf[len] = '\0';
+
+    return (int)len;
 }
 
 /* Gets the base directory of path and puts it in dir.
@@ -419,70 +441,149 @@ void str_to_lower(char *str)
     }
 }
 
-/* puts friendnum's nick in buf, truncating at TOXIC_MAX_NAME_LENGTH if necessary.
-   if toxcore API call fails, put UNKNOWN_NAME in buf
-   Returns nick len */
-size_t get_nick_truncate(Tox *m, char *buf, uint32_t friendnum)
+size_t get_nick_truncate(Tox *tox, char *buf, uint16_t buf_size, uint32_t friendnum)
 {
-    Tox_Err_Friend_Query err;
-    size_t len = tox_friend_get_name_size(m, friendnum, &err);
+    assert(buf_size > 0);
 
-    if (err != TOX_ERR_FRIEND_QUERY_OK) {
+    Tox_Err_Friend_Query err;
+    size_t len = tox_friend_get_name_size(tox, friendnum, &err);
+
+    if (err != TOX_ERR_FRIEND_QUERY_OK || len == 0) {
         goto on_error;
     } else {
-        if (!tox_friend_get_name(m, friendnum, (uint8_t *) buf, NULL)) {
+        uint8_t name[TOX_MAX_NAME_LENGTH];
+
+        if (len > TOX_MAX_NAME_LENGTH || !tox_friend_get_name(tox, friendnum, name, NULL)) {
             goto on_error;
         }
+
+        len = MIN(len, TOXIC_MAX_NAME_LENGTH - 1);
+        len = MIN(len, (size_t)buf_size - 1);
+        memcpy(buf, name, len);
     }
 
-    len = MIN(len, TOXIC_MAX_NAME_LENGTH - 1);
     buf[len] = '\0';
-    filter_str(buf, len);
+    filter_string(buf, len, false);
+
     return len;
 
 on_error:
-    strcpy(buf, UNKNOWN_NAME);
-    len = strlen(UNKNOWN_NAME);
-    buf[len] = '\0';
-    return len;
+    snprintf(buf, buf_size, "%s", UNKNOWN_NAME);
+    return strlen(buf);
 }
 
 /* same as get_nick_truncate but for conferences */
-int get_conference_nick_truncate(Tox *m, char *buf, uint32_t peernum, uint32_t conferencenum)
+int get_conference_nick_truncate(Tox *tox, char *buf, size_t buf_size, uint32_t peernum, uint32_t conferencenum)
 {
     Tox_Err_Conference_Peer_Query err;
-    size_t len = tox_conference_peer_get_name_size(m, conferencenum, peernum, &err);
+    size_t len = tox_conference_peer_get_name_size(tox, conferencenum, peernum, &err);
 
-    if (err != TOX_ERR_CONFERENCE_PEER_QUERY_OK) {
+    if (err != TOX_ERR_CONFERENCE_PEER_QUERY_OK || len == 0) {
         goto on_error;
     } else {
-        if (!tox_conference_peer_get_name(m, conferencenum, peernum, (uint8_t *) buf, NULL)) {
+        uint8_t name[TOX_MAX_NAME_LENGTH];
+
+        if (len > TOX_MAX_NAME_LENGTH || !tox_conference_peer_get_name(tox, conferencenum, peernum, name, NULL)) {
             goto on_error;
+        }
+
+        len = MIN(len, TOXIC_MAX_NAME_LENGTH - 1);
+        len = MIN(len, buf_size - 1);
+        memcpy(buf, name, len);
+    }
+
+    buf[len] = '\0';
+    filter_string(buf, len, true);
+    return (int)len;
+
+on_error:
+    snprintf(buf, buf_size, "%s", UNKNOWN_NAME);
+    return (int)strlen(buf);
+}
+
+/* same as get_nick_truncate but for groupchats */
+size_t get_group_nick_truncate(Tox *tox, char *buf, size_t buf_size, uint32_t peer_id, uint32_t groupnum)
+{
+    Tox_Err_Group_Peer_Query err;
+    size_t len = tox_group_peer_get_name_size(tox, groupnum, peer_id, &err);
+
+    if (err != TOX_ERR_GROUP_PEER_QUERY_OK || len == 0) {
+        snprintf(buf, buf_size, "%s", UNKNOWN_NAME);
+        len = strlen(buf);
+    } else {
+        uint8_t name[TOX_MAX_NAME_LENGTH];
+
+        if (len > TOX_MAX_NAME_LENGTH) {
+            len = TOX_MAX_NAME_LENGTH;
+        }
+
+        tox_group_peer_get_name(tox, groupnum, peer_id, name, &err);
+
+        if (err != TOX_ERR_GROUP_PEER_QUERY_OK) {
+            snprintf(buf, buf_size, "%s", UNKNOWN_NAME);
+            len = strlen(buf);
+        } else {
+            len = MIN(len, TOXIC_MAX_NAME_LENGTH - 1);
+            len = MIN(len, buf_size - 1);
+            memcpy(buf, name, len);
         }
     }
 
-    len = MIN(len, TOXIC_MAX_NAME_LENGTH - 1);
     buf[len] = '\0';
-    filter_str(buf, len);
-    return len;
 
-on_error:
-    strcpy(buf, UNKNOWN_NAME);
-    len = strlen(UNKNOWN_NAME);
-    buf[len] = '\0';
+    filter_string(buf, len, true);
+
     return len;
 }
 
-/* copies data to msg buffer, removing return characters.
-   returns length of msg, which will be no larger than size-1 */
+/* same as get_group_nick_truncate() but for self. */
+size_t get_group_self_nick_truncate(Tox *tox, char *buf, size_t buf_size, uint32_t groupnum)
+{
+    Tox_Err_Group_Self_Query err;
+    size_t len = tox_group_self_get_name_size(tox, groupnum, &err);
+
+    if (err != TOX_ERR_GROUP_SELF_QUERY_OK || len == 0) {
+        snprintf(buf, buf_size, "%s", UNKNOWN_NAME);
+        len = strlen(buf);
+    } else {
+        uint8_t name[TOX_MAX_NAME_LENGTH];
+
+        if (len > TOX_MAX_NAME_LENGTH) {
+            len = TOX_MAX_NAME_LENGTH;
+        }
+
+        tox_group_self_get_name(tox, groupnum, name, &err);
+
+        if (err != TOX_ERR_GROUP_SELF_QUERY_OK) {
+            snprintf(buf, buf_size, "%s", UNKNOWN_NAME);
+            len = strlen(buf);
+        } else {
+            len = MIN(len, TOXIC_MAX_NAME_LENGTH - 1);
+            len = MIN(len, buf_size - 1);
+            memcpy(buf, name, len);
+        }
+    }
+
+    buf[len] = '\0';
+
+    filter_string(buf, len, true);
+
+    return len;
+}
+
 size_t copy_tox_str(char *msg, size_t size, const char *data, size_t length)
 {
-    size_t i;
     size_t j = 0;
 
-    for (i = 0; (i < length) && (j < size - 1); ++i) {
-        if (data[i] != '\r') {
-            msg[j++] = data[i];
+    for (size_t i = 0; (i < length) && (j < size - 1); ++i) {
+        const char ch = data[i];
+
+        if (ch == '\t' || ch == '\v') {
+            msg[j] = ' ';
+            ++j;
+        } else if (ch != '\r') {
+            msg[j] = ch;
+            ++j;
         }
     }
 
@@ -495,13 +596,13 @@ size_t copy_tox_str(char *msg, size_t size, const char *data, size_t length)
    returns length of s if char not found or 0 if s is NULL. */
 int char_find(int idx, const char *s, char ch)
 {
-    if (!s) {
+    if (s == NULL) {
         return 0;
     }
 
-    int i = idx;
+    int i;
 
-    for (i = idx; s[i]; ++i) {
+    for (i = idx; s[i] != '\0'; ++i) {
         if (s[i] == ch) {
             break;
         }
@@ -514,7 +615,7 @@ int char_find(int idx, const char *s, char ch)
    returns 0 if char not found or s is NULL (skips 0th index). */
 int char_rfind(const char *s, char ch, int len)
 {
-    if (!s) {
+    if (s == NULL) {
         return 0;
     }
 
@@ -606,15 +707,15 @@ void set_window_title(ToxWindow *self, const char *title, int len)
 
     char cpy[TOXIC_MAX_NAME_LENGTH + 1];
 
-    if (self->type == WINDOW_TYPE_CONFERENCE) { /* keep conferencenumber in title for invites */
+    /* keep conferencenumber in title */
+    if (self->type == WINDOW_TYPE_CONFERENCE || self->type == WINDOW_TYPE_GROUPCHAT) {
         snprintf(cpy, sizeof(cpy), "%u %s", self->num, title);
     } else {
         snprintf(cpy, sizeof(cpy), "%s", title);
     }
 
     if (len > MAX_WINDOW_NAME_LENGTH) {
-        strcpy(&cpy[MAX_WINDOW_NAME_LENGTH - 3], "...");
-        cpy[MAX_WINDOW_NAME_LENGTH] = '\0';
+        memcpy(&cpy[MAX_WINDOW_NAME_LENGTH - 3], "...", 4);
     }
 
     snprintf(self->name, sizeof(self->name), "%s", cpy);
@@ -631,7 +732,7 @@ void free_ptr_array(void **arr)
 
     void **tmp = arr;
 
-    while (*arr) {
+    while (*arr != NULL) {
         free(*arr);
         ++arr;
     }
@@ -665,4 +766,90 @@ void **malloc_ptr_array(size_t length, size_t bytes)
     arr[length] = NULL;
 
     return arr;
+}
+
+unsigned int rand_range_not_secure(unsigned int upper_bound)
+{
+    const unsigned int n = (unsigned int)rand();
+
+    return n % MIN(RAND_MAX, upper_bound);
+}
+
+unsigned int rand_not_secure(void)
+{
+    const unsigned int n = (unsigned int)rand();
+
+    return n;
+}
+
+int colour_string_to_int(const char *colour)
+{
+    if (strcasecmp(colour, "white") == 0) {
+        return WHITE_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "red") == 0) {
+        return RED_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "green") == 0) {
+        return GREEN_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "yellow") == 0) {
+        return YELLOW_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "cyan") == 0) {
+        return CYAN_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "magenta") == 0) {
+        return MAGENTA_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "black") == 0) {
+        return BLACK_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "blue") == 0) {
+        return BLUE_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "gray") == 0) {
+        return GRAY_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "orange") == 0) {
+        return ORANGE_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "pink") == 0) {
+        return PINK_BAR_FG;
+    }
+
+    if (strcasecmp(colour, "brown") == 0) {
+        return BROWN_BAR_FG;
+    }
+
+    return -1;
+}
+
+size_t format_time_str(char *s, size_t max, const char *format, const struct tm *tm)
+{
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+    return strftime(s, max, format, tm);
+#pragma GCC diagnostic pop
+}
+
+bool string_contains_blocked_word(const char *line, const Client_Data *client_data)
+{
+    for (size_t i = 0; i < client_data->num_blocked_words; ++i) {
+        if (strcasestr(line, client_data->blocked_words[i]) != NULL) {
+            return true;
+        }
+    }
+
+    return false;
 }

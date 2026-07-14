@@ -1,26 +1,11 @@
 /*  term_mplex.c
  *
+ *  Copyright (C) 2015-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2015 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
-#include <limits.h> /* PATH_MAX */
 #include <stdio.h>  /* fgets, popen, pclose */
 #include <stdlib.h> /* malloc, realloc, free, getenv */
 #include <string.h> /* strlen, strcpy, strstr, strchr, strrchr, strcat, strncmp */
@@ -34,17 +19,17 @@
 #include <tox/tox.h>
 
 #include "execute.h"
+#include "paths.h"
 #include "settings.h"
 #include "term_mplex.h"
 #include "toxic.h"
 #include "windows.h"
+#include "toxic_constants.h"
 
-extern struct ToxWindow *prompt;
-extern struct user_settings *user_settings;
 extern struct Winthread Winthread;
 
-#if defined(PATH_MAX) && PATH_MAX > 512
-#define BUFFER_SIZE PATH_MAX
+#if TOXIC_MAX_PATH_LENGTH > 512
+#define BUFFER_SIZE TOXIC_MAX_PATH_LENGTH
 #else
 #define BUFFER_SIZE 512
 #endif
@@ -163,13 +148,13 @@ static char *extract_socket_path(const char *info)
     return strcpy(path, pos);
 }
 
-static int detect_gnu_screen(void)
+static int detect_gnu_screen(const Paths *paths)
 {
     FILE *session_info_stream = NULL;
     char *socket_name = NULL, *socket_path = NULL;
     char *dyn_buffer = NULL;
 
-    socket_name = getenv("STY");
+    socket_name = paths ? paths->screen_socket : NULL;
 
     if (!socket_name) {
         goto nomplex;
@@ -203,9 +188,7 @@ static int detect_gnu_screen(void)
         goto nomplex;
     }
 
-    strcpy(mplex_data, socket_path);
-    strcat(mplex_data, PATH_SEP_S);
-    strcat(mplex_data, socket_name);
+    snprintf(mplex_data, sizeof(mplex_data), "%s%s%s", socket_path, PATH_SEP_S, socket_name);
     free(socket_path);
     socket_path = NULL;
 
@@ -218,20 +201,15 @@ nomplex:
         pclose(session_info_stream);
     }
 
-    if (dyn_buffer) {
-        free(dyn_buffer);
-    }
-
-    if (socket_path) {
-        free(socket_path);
-    }
+    free(dyn_buffer);
+    free(socket_path);
 
     return 0;
 }
 
-static int detect_tmux(void)
+static int detect_tmux(const Paths *paths)
 {
-    char *tmux_env = getenv("TMUX"), *pos;
+    char *tmux_env = paths ? paths->tmux_socket : NULL, *pos;
 
     if (!tmux_env) {
         return 0;
@@ -258,10 +236,10 @@ static int detect_tmux(void)
    Returns 1 if present, 0 otherwise. This value can be used to determine
    whether an auto-away detection timer is needed.
  */
-static int detect_mplex(void)
+static int detect_mplex(const Paths *paths)
 {
     /* try screen, and if fails try tmux */
-    return detect_gnu_screen() || detect_tmux();
+    return detect_gnu_screen(paths) || detect_tmux(paths);
 }
 
 /* Detects gnu screen session attached/detached by examining permissions of
@@ -352,13 +330,8 @@ fail:
         pclose(session_info_stream);
     }
 
-    if (dyn_buffer) {
-        free(dyn_buffer);
-    }
-
-    if (search_str) {
-        free(search_str);
-    }
+    free(dyn_buffer);
+    free(search_str);
 
     return 0;
 }
@@ -372,13 +345,28 @@ fail:
    sample its state and update away status according to attached/detached state
    of the mplex.
  */
-static int mplex_is_detached(void)
+static bool mplex_is_detached(void)
 {
-    return gnu_screen_is_detached()  ||  tmux_is_detached();
+    return gnu_screen_is_detached() || tmux_is_detached();
 }
 
-static void mplex_timer_handler(Tox *m)
+static void mplex_timer_handler(Toxic *toxic)
 {
+    if (toxic == NULL) {
+        return;
+    }
+
+    pthread_mutex_lock(&Winthread.lock);
+    const bool auto_away_enabled = toxic->c_config->mplex_away;
+    pthread_mutex_unlock(&Winthread.lock);
+
+    // needed in case config is changed during a running session
+    if (!auto_away_enabled) {
+        return;
+    }
+
+    ToxWindow *home_window = toxic->home_window;
+
     Tox_User_Status current_status, new_status;
     const char *new_note;
 
@@ -386,10 +374,10 @@ static void mplex_timer_handler(Tox *m)
         return;
     }
 
-    int detached = mplex_is_detached();
+    const bool detached = mplex_is_detached();
 
     pthread_mutex_lock(&Winthread.lock);
-    current_status = tox_self_get_status(m);
+    current_status = tox_self_get_status(toxic->tox);
     pthread_mutex_unlock(&Winthread.lock);
 
     if (auto_away_active && current_status == TOX_USER_STATUS_AWAY && !detached) {
@@ -401,11 +389,11 @@ static void mplex_timer_handler(Tox *m)
         prev_status = current_status;
         new_status = TOX_USER_STATUS_AWAY;
         pthread_mutex_lock(&Winthread.lock);
-        size_t slen = tox_self_get_status_message_size(m);
-        tox_self_get_status_message(m, (uint8_t *) prev_note);
+        const size_t slen = tox_self_get_status_message_size(toxic->tox);
+        tox_self_get_status_message(toxic->tox, (uint8_t *) prev_note);
         prev_note[slen] = '\0';
+        new_note = toxic->c_config->mplex_away_note;
         pthread_mutex_unlock(&Winthread.lock);
-        new_note = user_settings->mplex_away_note;
     } else {
         return;
     }
@@ -418,31 +406,39 @@ static void mplex_timer_handler(Tox *m)
     snprintf(note_str, sizeof(status_str), "/note %s", new_note);
 
     pthread_mutex_lock(&Winthread.lock);
-    execute(prompt->chatwin->history, prompt, m, status_str, GLOBAL_COMMAND_MODE);
-    execute(prompt->chatwin->history, prompt, m, note_str, GLOBAL_COMMAND_MODE);
+    execute(home_window->chatwin->history, home_window, toxic, status_str, GLOBAL_COMMAND_MODE);
+    execute(home_window->chatwin->history, home_window, toxic, note_str, GLOBAL_COMMAND_MODE);
     pthread_mutex_unlock(&Winthread.lock);
 }
 
 /* Time in seconds between calls to mplex_timer_handler */
-#define MPLEX_TIMER_INTERVAL 5
+#define MPLEX_TIMER_INTERVAL 2
 
-void *mplex_timer_thread(void *data)
+_Noreturn static void *mplex_timer_thread(void *data)
 {
-    Tox *m = (Tox *) data;
+    Toxic *toxic = (Toxic *) data;
 
     while (true) {
         sleep(MPLEX_TIMER_INTERVAL);
-        mplex_timer_handler(m);
+        mplex_timer_handler(toxic);
     }
 }
 
-int init_mplex_away_timer(Tox *m)
+int init_mplex_away_timer(Toxic *toxic)
 {
-    if (! detect_mplex()) {
+    if (toxic == NULL) {
+        return -1;
+    }
+
+    if (!detect_mplex(toxic->paths)) {
         return 0;
     }
 
-    if (! user_settings->mplex_away) {
+    if (toxic->client_data.mplex_auto_away_initialized) {
+        return 0;
+    }
+
+    if (!toxic->c_config->mplex_away) {
         return 0;
     }
 
@@ -451,9 +447,11 @@ int init_mplex_away_timer(Tox *m)
         return -1;
     }
 
-    if (pthread_create(&mplex_tid, NULL, mplex_timer_thread, (void *) m) != 0) {
+    if (pthread_create(&mplex_tid, NULL, mplex_timer_thread, (void *)toxic) != 0) {
         return -1;
     }
+
+    toxic->client_data.mplex_auto_away_initialized = true;
 
     return 0;
 }

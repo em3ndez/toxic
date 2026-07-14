@@ -1,27 +1,12 @@
 /*  configdir.c
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <errno.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,29 +19,15 @@
 #include "toxic.h"
 
 /* get the user's home directory. */
-void get_home_dir(char *home, int size)
+void get_home_dir(const Paths *paths, char *home, int size)
 {
-    struct passwd pwd;
-    struct passwd *pwdbuf;
-    const char *hmstr;
-    char buf[NSS_BUFLEN_PASSWD];
-
-    int rc = getpwuid_r(getuid(), &pwd, buf, NSS_BUFLEN_PASSWD, &pwdbuf);
-
-    if (rc == 0) {
-        hmstr = pwd.pw_dir;
+    if (paths && paths->home_dir) {
+        snprintf(home, size, "%s", paths->home_dir);
     } else {
-        hmstr = getenv("HOME");
-
-        if (hmstr == NULL) {
-            return;
+        if (size > 0) {
+            home[0] = '\0';
         }
-
-        snprintf(buf, sizeof(buf), "%s", hmstr);
-        hmstr = buf;
     }
-
-    snprintf(home, size, "%s", hmstr);
 }
 
 /**
@@ -66,10 +37,10 @@ void get_home_dir(char *home, int size)
  *
  * @return The users config dir or NULL on error.
  */
-char *get_user_config_dir(void)
+char *get_user_config_dir(const Paths *paths)
 {
     char home[NSS_BUFLEN_PASSWD] = {0};
-    get_home_dir(home, sizeof(home));
+    get_home_dir(paths, home, sizeof(home));
 
     char *user_config_dir = NULL;
     size_t len = 0;
@@ -85,7 +56,7 @@ char *get_user_config_dir(void)
     snprintf(user_config_dir, len, "%s/Library/Application Support", home);
 # else /* __APPLE__ */
 
-    const char *tmp = getenv("XDG_CONFIG_HOME");
+    const char *tmp = paths ? paths->xdg_config_home : NULL;
 
     if (tmp == NULL) {
         len = strlen(home) + strlen("/.config") + 1;
@@ -119,18 +90,24 @@ int create_user_config_dirs(char *path)
         return -1;
     }
 
-    char *fullpath = malloc(strlen(path) + strlen(CONFIGDIR) + 1);
-    char *logpath = malloc(strlen(path) + strlen(LOGDIR) + 1);
+    size_t path_len = strlen(path);
+    size_t fullpath_len = path_len + strlen(CONFIGDIR) + 1;
+    char *fullpath = malloc(fullpath_len);
 
-    if (fullpath == NULL || logpath == NULL) {
-        exit_toxic_err("failed in load_data_structures", FATALERR_MEMORY);
+    if (fullpath == NULL) {
+        return -1;
     }
 
-    strcpy(fullpath, path);
-    strcat(fullpath, CONFIGDIR);
+    size_t logpath_len = path_len + strlen(LOGDIR) + 1;
+    char *logpath = malloc(logpath_len);
 
-    strcpy(logpath, path);
-    strcat(logpath, LOGDIR);
+    if (logpath == NULL) {
+        free(fullpath);
+        return -1;
+    }
+
+    snprintf(fullpath, fullpath_len, "%s%s", path, CONFIGDIR);
+    snprintf(logpath, logpath_len, "%s%s", path, LOGDIR);
 
     mkdir_err = mkdir(fullpath, 0700);
 

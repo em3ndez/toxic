@@ -5,17 +5,17 @@ CFG_DIR = $(BASE_DIR)/cfg
 
 LIBS = toxcore ncursesw libconfig libcurl
 
-CFLAGS ?= -std=c99 -pthread -Wall -Wpedantic -Wunused -fstack-protector-all -Wvla -Wno-missing-braces
+CFLAGS ?= -std=c11 -pthread -Wall -Wpedantic -Wunused -fstack-protector-all -Wvla -Wno-missing-braces -Wmissing-prototypes -Wcast-align -Wcast-qual -Wmissing-declarations -Wshadow -Wunused-macros -Wformat-nonliteral -Wno-unknown-pragmas
 CFLAGS += '-DTOXICVER="$(VERSION)"' -DHAVE_WIDECHAR -D_XOPEN_SOURCE_EXTENDED -D_FILE_OFFSET_BITS=64
 CFLAGS += '-DPACKAGE_DATADIR="$(abspath $(DATADIR))"'
 CFLAGS += ${USER_CFLAGS}
 LDFLAGS ?=
 LDFLAGS += ${USER_LDFLAGS}
 
-OBJ = autocomplete.o avatars.o bootstrap.o chat.o chat_commands.o configdir.o curl_util.o execute.o
-OBJ += file_transfers.o friendlist.o global_commands.o conference_commands.o conference.o help.o input.o line_info.o
-OBJ += log.o message_queue.o misc_tools.o name_lookup.o notify.o prompt.o qr_code.o settings.o
-OBJ += term_mplex.o toxic.o toxic_strings.o windows.o
+OBJ = autocomplete.o avatars.o bootstrap.o chat.o chat_commands.o conference.o configdir.o curl_util.o execute.o
+OBJ += file_transfers.o friendlist.o global_commands.o conference_commands.o groupchats.o groupchat_commands.o help.o
+OBJ += init_queue.o input.o line_info.o log.o main.o message_queue.o misc_tools.o name_lookup.o netprof.o notify.o paths.o prompt.o qr_code.o
+OBJ += settings.o term_mplex.o toxic.o toxic_strings.o windows.o
 
 # Check if debug build is enabled
 RELEASE := $(shell if [ -z "$(ENABLE_RELEASE)" ] || [ "$(ENABLE_RELEASE)" = "0" ] ; then echo disabled ; else echo enabled ; fi)

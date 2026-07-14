@@ -1,23 +1,9 @@
 /*  game_life.c
  *
+ *  Copyright (C) 2020-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2021 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #include <stdio.h>
@@ -242,12 +228,12 @@ static int life_get_live_neighbours(const LifeState *state, const int i, const i
 
     int count = 0;
 
-    for (size_t i = 0; i < 8; ++i) {
-        if (n[i] == NULL) {
+    for (size_t idx = 0; idx < 8; ++idx) {
+        if (n[idx] == NULL) {
             return 0; // If we're at a boundary kill cell
         }
 
-        if (n[i]->alive) {
+        if (n[idx]->alive) {
             ++count;
         }
     }
@@ -346,24 +332,24 @@ static void life_start(GameData *game, LifeState *state)
     state->generation = 1;
 }
 
-void life_cb_update_game_state(GameData *game, void *cb_data)
+static void life_cb_update_game_state(GameData *game, void *cb_data)
 {
-    if (!cb_data) {
+    LifeState *state = (LifeState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    LifeState *state = (LifeState *)cb_data;
 
     life_cycle(game, state);
 }
 
-void life_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
+static void life_cb_render_window(GameData *game, WINDOW *win, void *cb_data)
 {
-    if (!cb_data) {
+    LifeState *state = (LifeState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    LifeState *state = (LifeState *)cb_data;
 
     move(state->curs_y, state->curs_x);
 
@@ -442,13 +428,13 @@ static void life_move_curs_down_left(LifeState *state)
     life_move_curs_left(state);
 }
 
-void life_cb_on_keypress(GameData *game, int key, void *cb_data)
+static void life_cb_on_keypress(GameData *game, int key, void *cb_data)
 {
-    if (!cb_data) {
+    LifeState *state = (LifeState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    LifeState *state = (LifeState *)cb_data;
 
     switch (key) {
         case KEY_LEFT: {
@@ -547,32 +533,30 @@ static void life_free_cells(LifeState *state)
     }
 
     for (int i = 0; i < state->num_rows; ++i) {
-        if (state->cells[i]) {
-            free(state->cells[i]);
-        }
+        free(state->cells[i]);
     }
 
     free(state->cells);
 }
 
-void life_cb_pause(GameData *game, bool is_paused, void *cb_data)
+static void life_cb_pause(GameData *game, bool is_paused, void *cb_data)
 {
-    if (!cb_data) {
+    LifeState *state = (LifeState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    LifeState *state = (LifeState *)cb_data;
 
     state->paused = is_paused;
 }
 
-void life_cb_kill(GameData *game, void *cb_data)
+static void life_cb_kill(GameData *game, void *cb_data)
 {
-    if (!cb_data) {
+    LifeState *state = (LifeState *)cb_data;
+
+    if (state == NULL) {
         return;
     }
-
-    LifeState *state = (LifeState *)cb_data;
 
     life_free_cells(state);
     free(state);

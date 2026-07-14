@@ -1,7 +1,7 @@
 /*  toxic_strings.h
  *
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
+ *  Copyright (C) 2026 Toxic All Rights Reserved.
  *
  *  This file is part of Toxic.
  *
@@ -64,7 +64,7 @@ void add_line_to_hist(ChatContext *ctx);
    hst_pos is decremented or incremented depending on key_dir.
 
    resets line if at end of history */
-void fetch_hist_item(ChatContext *ctx, int key_dir);
+void fetch_hist_item(const Client_Config *c_config, ChatContext *ctx, int key_dir);
 
 /* Substitutes all occurrences of old with new. */
 void strsubst(char *str, char old, char new);

@@ -1,27 +1,15 @@
 /*  conference.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef CONFERENCE_H
 #define CONFERENCE_H
+
+#include <time.h>
 
 #include "toxic.h"
 #include "windows.h"
@@ -46,6 +34,7 @@ typedef struct ConferencePeer {
 typedef struct AudioInputCallbackData {
     Tox *tox;
     uint32_t conferencenum;
+    int audio_channels;
 } AudioInputCallbackData;
 
 #define PUBKEY_STRING_SIZE (2 * TOX_PUBLIC_KEY_SIZE + 1)
@@ -57,11 +46,14 @@ typedef struct NameListEntry {
 
 
 typedef struct {
-    int chatwin;
+    uint32_t conferencenum;
+    uint16_t window_id;
     bool active;
     uint8_t type;
     int side_pos;    /* current position of the sidebar - used for scrolling up and down */
     time_t start_time;
+
+    char id[TOX_CONFERENCE_UID_SIZE];
 
     char title[CONFERENCE_MAX_TITLE_LENGTH + 1];
     size_t title_length;
@@ -82,16 +74,16 @@ typedef struct {
 } ConferenceChat;
 
 /* Frees all Toxic associated data structures for a conference (does not call tox_conference_delete() ) */
-void free_conference(ToxWindow *self, uint32_t conferencenum);
+void free_conference(ToxWindow *self, Windows *windows, const Client_Config *c_config, uint32_t conferencenum);
 
-int init_conference_win(Tox *m, uint32_t conferencenum, uint8_t type, const char *title, size_t length);
+int init_conference_win(Toxic *toxic, uint32_t conferencenum, uint8_t type, const char *title, size_t length);
 
 /* destroys and re-creates conference window with or without the peerlist */
 void redraw_conference_win(ToxWindow *self);
 
 void conference_set_title(ToxWindow *self, uint32_t conferencesnum, const char *title, size_t length);
-void conference_rename_log_path(Tox *m, uint32_t conferencenum, const char *new_title);
-int conference_enable_logging(ToxWindow *self, Tox *m, uint32_t conferencenum, struct chatlog *log);
+void conference_rename_log_path(Toxic *toxic, uint32_t conferencenum, const char *new_title);
+int conference_enable_logging(ToxWindow *self, Tox *tox, uint32_t conferencenum, struct chatlog *log);
 
 /* Puts `(NameListEntry *)`s in `entries` for each matched peer, up to a maximum
  * of `maxpeers`.
@@ -102,16 +94,44 @@ int conference_enable_logging(ToxWindow *self, Tox *m, uint32_t conferencenum, s
 uint32_t get_name_list_entries_by_prefix(uint32_t conferencenum, const char *prefix, NameListEntry **entries,
         uint32_t maxpeers);
 
-bool init_conference_audio_input(Tox *tox, uint32_t conferencenum);
-bool enable_conference_audio(ToxWindow *self, Tox *tox, uint32_t conferencenum);
-bool disable_conference_audio(ToxWindow *self, Tox *tox, uint32_t conferencenum);
+/*
+ * Sets the tab name colour config option for the conference associated with `public_key` to `colour`.
+ *
+ * `public_key` should be a string representing the conference's unique ID.
+ *
+ * Return true on success.
+ */
+bool conference_config_set_tab_name_colour(Windows *windows, const char *public_key, const char *colour);
+
+/*
+ * Sets the auto-logging preference for the conference associated with `public_key`.
+ *
+ * `public_key` should be a string representing the conference's unique ID.
+ *
+ * Return true on success.
+ */
+bool conference_config_set_autolog(Windows *windows, const char *public_key, bool autolog_enabled);
+
+/* Enable audio in a conference.
+ *
+ * Return true on success or if audio is already enabled.
+ */
+bool enable_conference_audio(ToxWindow *self, Toxic *toxic, uint32_t conferencenum);
+
+/* Disable audio in a conference.
+ *
+ * Return true on success or if audio is already disabled.
+ */
+bool disable_conference_audio(ToxWindow *self, Toxic *toxic, uint32_t conferencenum);
+
+bool init_conference_audio_input(Toxic *toxic, uint32_t conferencenum);
 bool toggle_conference_push_to_talk(uint32_t conferencenum, bool enabled);
 void audio_conference_callback(void *tox, uint32_t conferencenum, uint32_t peernum,
                                const int16_t *pcm, unsigned int samples, uint8_t channels, uint32_t
                                sample_rate, void *userdata);
 
 bool conference_mute_self(uint32_t conferencenum);
-bool conference_mute_peer(const Tox *m, uint32_t conferencenum, uint32_t peernum);
+bool conference_mute_peer(const Tox *tox, uint32_t conferencenum, uint32_t peernum);
 bool conference_set_VAD_threshold(uint32_t conferencenum, float threshold);
 float conference_get_VAD_threshold(uint32_t conferencenum);
 

@@ -1,23 +1,9 @@
 /*  friendlist.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef FRIENDLIST_H
@@ -46,6 +32,11 @@ struct ConferenceInvite {
     bool pending;
 };
 
+struct GroupInvite {
+    uint8_t *data;
+    uint16_t length;
+};
+
 #ifdef GAMES
 
 struct GameInvite {
@@ -58,6 +49,21 @@ struct GameInvite {
 
 #endif // GAMES
 
+/* Config settings for this friend.
+ *
+ * These values are set on initialization and should not change afterwards.
+ * If a client modifies one of these settings via command and then closes
+ * the chat window, these values will override the client's modified settings
+ * upon re-opening the respective friend's chat window.
+ */
+typedef struct Friend_Settings {
+    int   tab_name_colour;
+    bool  autolog;
+    bool  auto_accept_files;
+    bool  show_connection_msg;
+    bool  alias_set;
+} Friend_Settings;
+
 typedef struct {
     char name[TOXIC_MAX_NAME_LENGTH + 1];
     uint16_t namelength;
@@ -65,22 +71,28 @@ typedef struct {
     size_t statusmsg_len;
     char pub_key[TOX_PUBLIC_KEY_SIZE];
     uint32_t num;
-    int chatwin;
+    int window_id;
     bool active;
     Tox_Connection connection_status;
     bool is_typing;
-    bool logging_on;    /* saves preference for friend irrespective of global settings */
+    bool logging_on;    /* saves preference for friend irrespective of config settings */
+    bool auto_accept_files;  /* same as above; default should always be false */
     Tox_User_Status status;
 
     struct LastOnline last_online;
-    struct ConferenceInvite conference_invite;
 
 #ifdef GAMES
     struct GameInvite game_invite;
 #endif
 
+    struct ConferenceInvite conference_invite;
+    struct GroupInvite group_invite;
+
     struct FileTransfer file_receiver[MAX_FILES];
     struct FileTransfer file_sender[MAX_FILES];
+    PendingFileTransfer file_send_queue[MAX_FILES];
+
+    Friend_Settings settings;
 } ToxicFriend;
 
 typedef struct {
@@ -92,7 +104,7 @@ typedef struct {
     uint64_t last_on;
 } BlockedFriend;
 
-typedef struct {
+typedef struct FriendsList {
     int num_selected;
     size_t num_friends;
     size_t num_online;
@@ -101,24 +113,167 @@ typedef struct {
     ToxicFriend *list;
 } FriendsList;
 
+typedef struct BlockedList BlockedList;
+
+void init_friendlist(Toxic *toxic);
+
 ToxWindow *new_friendlist(void);
-void friendlist_onInit(ToxWindow *self, Tox *m);
-void disable_chatwin(uint32_t f_num);
+void friendlist_onInit(ToxWindow *self, Toxic *toxic);
+void disable_friend_window(FriendsList *friends, uint32_t f_num);
 int get_friendnum(uint8_t *name);
-int load_blocklist(char *data);
-void kill_friendlist(ToxWindow *self);
-void friendlist_onFriendAdded(ToxWindow *self, Tox *m, uint32_t num, bool sort);
-Tox_User_Status get_friend_status(uint32_t friendnumber);
-Tox_Connection get_friend_connection_status(uint32_t friendnumber);
+void kill_friendlist(ToxWindow *self, FriendsList *friends, BlockedList *blocked, Windows *windows,
+                     const Client_Config *c_config);
+void friendlist_onFriendAdded(ToxWindow *self, Toxic *toxic, uint32_t num, bool sort);
+Tox_User_Status get_friend_status(const FriendsList *friends, uint32_t friendnumber);
+Tox_Connection get_friend_connection_status(const FriendsList *friends, uint32_t friendnumber);
+
+/*
+ * Returns the number of friends in the friend list.
+ */
+size_t friendlist_get_count(const FriendsList *friends);
+
+/*
+ * Copies names from the friends list into the `names` array.
+ *
+ * @max_names The maximum number of names to copy.
+ * @max_name_size The maximum number of bytes to copy per name.
+ */
+void friendlist_get_names(const FriendsList *friends, char **names, size_t max_names, size_t max_name_size);
+
+/*
+ * Loads the list of blocked peers from `path`.
+ *
+ * Returns 0 on success or if the file doesn't exist (a file will only exist if
+ *   the client has actually blocked someone).
+ * Returns -1 on failure.
+ */
+int load_blocklist(const char *path, BlockedList *blocked);
 
 /* sorts friendlist_index first by connection status then alphabetically */
-void sort_friendlist_index(void);
+void sort_friendlist_index(FriendsList *friends);
 
 /*
  * Returns true if friend associated with `public_key` is in the block list.
  *
  * `public_key` must be at least TOX_PUBLIC_KEY_SIZE bytes.
  */
-bool friend_is_blocked(const char *public_key);
+bool friend_is_blocked(const BlockedList *blocked, const char *public_key);
+
+/*
+ * Enable or disable auto-accepting file transfers for this friend.
+ */
+void friend_set_auto_file_accept(FriendsList *friends, uint32_t friendnumber, bool auto_accept);
+
+/*
+ * Return true if auto-accepting file transfers is enabled for this friend.
+ */
+bool friend_get_auto_accept_files(const FriendsList *friends, uint32_t friendnumber);
+
+/*
+ * Puts a NUL-terminated string representing a friend's name in `buf`. If
+ * `friendnumber` does not designate a valid friend number, a place-holder name
+ * is put in `buf`.
+ *
+ * Returns the length of the name.
+ */
+uint16_t get_friend_name(const FriendsList *friends, char *buf, size_t buf_size, uint32_t friendnumber);
+
+/*
+ * Returns the friend number associated with `name`.
+ *
+ * @length The length of the name.
+ *
+ * Returns -1 if `name` does not designate a friend in the friend list.
+ * Returns -2 if `name` matches more than one friend in the friend list.
+ */
+int64_t get_friend_number_name(const FriendsList *friends, const char *name, uint16_t length);
+
+/*
+ * Puts a friend's public key in `pk`, which must have room for at least
+ * TOX_PUBLIC_KEY_SIZE bytes.
+ *
+ * Returns true on success.
+ */
+bool get_friend_public_key(const FriendsList *friends, char *pk, uint32_t friendnumber);
+
+/*
+ * Enable or disable logging for this friend.
+ */
+void friend_set_logging_enabled(FriendsList *friends, uint32_t friendnumber, bool enable_log);
+
+/*
+ * Return true if logging is currently enabled for this friend.
+ */
+bool friend_get_logging_enabled(const FriendsList *friends, uint32_t friendnumber);
+
+/*
+ * Sets the show connection message config option for the friend associated
+ * with `public_key`.
+ *
+ * Return true on success.
+ */
+bool friend_config_set_show_connection_msg(FriendsList *friends, const char *public_key, bool show_connection_msg);
+
+/*
+ * Returns the friend's config setting for showing connection messages.
+ */
+bool friend_config_get_show_connection_msg(const FriendsList *friends, uint32_t friendnumber);
+
+/*
+ * Sets the tab name colour config option for the friend associated with `public_key` to `colour`.
+ *
+ * Return true on success.
+ */
+bool friend_config_set_tab_name_colour(FriendsList *friends, const char *public_key, const char *colour);
+
+/*
+ * Returns a friend's tab name colour.
+ * Returns -1 on error.
+ */
+int friend_config_get_tab_name_colour(const FriendsList *friends, uint32_t friendnumber);
+
+/*
+ * Sets the autolog config option for the friend associated with `public_key`.
+ *
+ * Return true on success.
+ */
+bool friend_config_set_autolog(FriendsList *friends, const char *public_key, bool autolog_enabled);
+
+/*
+ * Returns the friend's config setting for autologging.
+ *
+ * Note: To determine if logging for a friend is currently enabled,
+ * use `friend_get_logging_enabled()`.
+ */
+bool friend_config_get_autolog(const FriendsList *friends, uint32_t friendnumber);
+
+/*
+ * Sets the auto-accept file transfers config option for the friend associated with
+ * `public_key`.
+ *
+ * Return true on success.
+ */
+bool friend_config_set_auto_accept_files(FriendsList *friends, const char *public_key, bool autoaccept_files);
+
+/*
+ * Returns the friend's config setting for auto-accept file transfers.
+ *
+ * Note: To determine if auto-accepting files for a friend is currently enabled,
+ * use `friend_get_auto_accept_files()`.
+ */
+bool friend_config_get_auto_accept_files(const FriendsList *friends, uint32_t friendnumber);
+
+/*
+ * Sets the friend's alias.
+ *
+ * Return true on success.
+ */
+bool friend_config_set_alias(FriendsList *friends, const char *public_key, const char *alias, uint16_t length);
+
+/* Return true if the friend has an alias. */
+bool friend_config_alias_is_set(const FriendsList *friends, uint32_t friendnumber);
+
+/* Sets config settings to global defaults for all friends, ignoring friend-specific settings. */
+void friend_reset_default_config_settings(FriendsList *friends, const Client_Config *c_config);
 
 #endif /* end of include guard: FRIENDLIST_H */

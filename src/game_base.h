@@ -1,23 +1,9 @@
 /*  game_base.h
  *
+ *  Copyright (C) 2020-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2020 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef GAME_BASE
@@ -133,7 +119,9 @@ struct GameData {
     size_t     level;
     GameStatus status;
     GameType   type;
+
     bool       is_multiplayer;
+    bool       winner;  // true if you won the game
 
     bool       show_lives;
     bool       show_score;
@@ -149,10 +137,10 @@ struct GameData {
     int        parent_max_x; // max dimensions of parent window
     int        parent_max_y;
 
-    int        window_id;
+    uint16_t   window_id;
     WINDOW     *window;
 
-    Tox        *tox;  // must be locked with Winthread mutex
+    Toxic      *toxic;  // must be locked with Winthread mutex
 
     GameWindowShape    window_shape;
 
@@ -214,10 +202,13 @@ void game_set_cb_on_packet(GameData *game, cb_game_on_packet *func, void *cb_dat
  * `type` must be a valid GameType.
  *
  * `id` should be a unique integer to indentify the game instance. If we're being invited to a game
- *   this identifier should be sent via the invite packet.
+ *  this identifier should be sent via the invite packet.
  *
- * if `multiplayer_data` is non-null this indicates that we accepted a game invite from a contact.
- *   The data contains any information we need to initialize the game state.
+ * if `multiplayer_data` is non-null it contains information that we received from the inviter
+ * necessary to initialize the game state.
+ *
+ * if `self_host` is true, the caller is the host of the game. If the game is not initialized from a
+ * friend's chat window this parameter has no effect.
  *
  * Return 0 on success.
  * Return -1 if screen is too small.
@@ -225,8 +216,8 @@ void game_set_cb_on_packet(GameData *game, cb_game_on_packet *func, void *cb_dat
  * Return -3 if multiplayer game is being initialized outside of a contact's window.
  * Return -4 on other failure.
  */
-int game_initialize(const ToxWindow *self, Tox *m, GameType type, uint32_t id, const uint8_t *multiplayer_data,
-                    size_t length);
+int game_initialize(const ToxWindow *self, Toxic *toxic, GameType type, uint32_t id, const uint8_t *multiplayer_data,
+                    size_t length, bool self_host);
 
 /*
  * Sets game window to `shape`.
@@ -252,12 +243,12 @@ const char *game_get_name_string(GameType type);
 /*
  * Prints all available games to window associated with `self`.
  */
-void game_list_print(ToxWindow *self);
+void game_list_print(ToxWindow *self, const Client_Config *c_config);
 
 /*
  * Return true if game `type` has a multiplayer mode.
  */
-bool game_type_is_multiplayer(GameType type);
+bool game_type_has_multiplayer(GameType type);
 
 /*
  * Returns true if coordinates designated by `x` and `y` are within the game window boundaries.
@@ -342,6 +333,11 @@ size_t game_get_current_level(const GameData *game);
 void game_set_status(GameData *game, GameStatus status);
 
 /*
+ * Sets winner flag. This should only be called when the game status is set to finished.
+ */
+void game_set_winner(GameData *game, bool winner);
+
+/*
  * Sets the game base update interval.
  *
  * Lower values of `update_interval` make the game faster, where 1 is the fastest and 50 is slowest.
@@ -384,7 +380,7 @@ TIME_MS get_time_millis(void);
 /*
  * Ends game associated with `self` and cleans up.
  */
-void game_kill(ToxWindow *self);
+void game_kill(ToxWindow *self, Windows *windows, const Client_Config *c_config);
 
 /*
  * Sends a packet containing payload `data` of size `length` to the friendnumber associated with the game's

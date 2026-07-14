@@ -8,6 +8,9 @@ ui = {
   // true to enable acoustic alerts on messages, false to disable
   alerts=true;
 
+  // true to show notification content on desktop alerts, false to hide
+  show_notification_content=true;
+
   // Output a bell when receiving a message (see manpage)
   bell_on_message=true;
 
@@ -20,19 +23,23 @@ ui = {
   // Output a bell when receiving a group/call invite (see manpage)
   bell_on_invite=true;
 
-  // true to use native terminal colours, false to use toxic default colour theme
+  // true to use native terminal colors, false to use toxic default color theme
   native_colors=false;
 
-  // set background color of chat status bars (black, white, red, green, blue, cyan, yellow, magenta)
+  // set background color of chat status bars
+  // colors: black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink
   color_bar_bg="blue";
 
-  // set foreground (text) color of chat status bars (black, white, red, green, blue, cyan, yellow, magenta)
+  // set foreground (text) color of chat status bars
+  // colors: black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink
   color_bar_fg="white";
 
-  // set foreground accent color of chat status bars (black, white, red, green, blue, cyan, yellow, magenta)
+  // set foreground accent color of chat status bars
+  // colors: black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink
   color_bar_accent="cyan";
 
-  // set foreground notify (and typing) color in chat status bar (black, white, red, green, blue, cyan, yellow, magenta)
+  // set foreground notify (and typing) color in chat status bar
+  // colors: black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink
   color_bar_notify="yellow";
 
   // true to enable autologging, false to disable
@@ -44,6 +51,10 @@ ui = {
   // Timestamp format string according to date/strftime format. Overrides time_format setting
   timestamp_format="%H:%M";
 
+  // Timestamp format string for raw logs according to date/strftime format. (Note: the time
+  // of the format string must be enclosed in square brackets in order to be parsed by toxic).
+  log_timestamp_format="%Y/%m/%d [%H:%M]"
+
   // true to show you when others are typing a message in 1-on-1 chats
   show_typing_other=true;
 
@@ -53,8 +64,14 @@ ui = {
   // true to show the welcome message on startup
   show_welcome_msg=true;
 
-  // true to show friend connection change messages on the home screen
+  // true to enable friend connection change notifications
   show_connection_msg=true;
+
+  // true to show peer connection change messages in groups
+  show_group_connection_msg=true;
+
+  // true to show network information in the UI home window
+  show_network_info=true;
 
   // How often in days to update the DHT nodes list. (0 to disable updates)
   nodeslist_update_freq=7;
@@ -68,6 +85,13 @@ ui = {
   // time in milliseconds to display a notification
   notification_timeout=6000;
 
+  // time in seconds to keep the audio device open after playing a notification sound
+  device_cooldown=5;
+
+  // true to pad every wrapped line of a message with enough spaces to
+  // align it to the beginning of the first line
+  line_padding=true;
+
   // Indicator for display when someone connects or joins a group
   line_join="-->";
 
@@ -80,11 +104,17 @@ ui = {
   // Indicator for normal messages.
   line_normal="-";
 
+  // Indicator for special messages.
+  line_special=">";
+
   // true to change status based on screen/tmux attach/detach, false to disable
   mplex_away=true;
 
   // Status message to use when status set to away due to screen/tmux detach
   mplex_away_note="Away from keyboard, be back soon!"
+
+  // Parting message that will be sent to all groupchat peers when you leave the group
+  group_part_message="Toxic user signing out"
 };
 
 audio = {
@@ -121,6 +151,76 @@ tox = {
   // chatlogs_path="/home/USERNAME/toxic_chatlogs/";
 };
 
+// Friend-specific config settings. Public keys are used as friend identifiers
+// and must begin with the prefix "pk_". These take priority over global settings.
+friends = {
+  pk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA = {
+    // Set an alias for this friend.
+    alias="EXAMPLE_NAME";
+
+    // Enable auto-accepting inbound file transfers for this friend.
+    auto_accept_files=false;
+
+    // Enable autologging for this friend.
+    autolog=false;
+
+    // true to enable connection change notifications.
+    show_connection_msg=true;
+
+    // The color of the friend's window tab name.
+    // colors: black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink
+    tab_name_color="white";
+  };
+
+// pk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA = {
+//   ...
+// };
+};
+
+// Groupchat-specific config settings. Public keys (chat ID's) are used as
+// group identifiers and must begin with the prefix "pk_". These take priority
+// over global settings.
+groupchats = {
+  pk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA = {
+    // Enable autologging for this group.
+    autolog=false;
+
+    // The color of the group's window tab name.
+    // colors: black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink
+    tab_name_color="white";
+  };
+
+// pk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA = {
+//   ...
+// };
+};
+
+// Conference-specific config settings. Public keys are used as group identifiers
+// and must begin with the prefix "pk_". These take priority over global settings.
+conferences = {
+  pk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA = {
+    // Enable autologging for this conference.
+    autolog=false;
+
+    // The color of the conference's window tab name.
+    // colors: black, white, gray, brown, red, green, blue, cyan, yellow, magenta, orange, pink
+    tab_name_color="white";
+  };
+
+// pk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA = {
+//   ...
+// };
+};
+
+// A list of case-insensitive words that cannot be sent in messages. If you attempt to send
+// a message that contains a word in this list to a group, friend, etc., the message will not
+// send and an error will be displayed. Words must be enclosed in double quotes and must not
+// be longer than 256 characters.
+blocked_words = [
+  // "hunter2",
+  // "certainly!"
+];
+
 // To disable a sound set the path to "silent"
 sounds = {
   error="__DATADIR__/sounds/ToxicError.wav";
@@ -138,11 +238,12 @@ sounds = {
 keys = {
   next_tab="Ctrl+P";
   prev_tab="Ctrl+O";
-  scroll_line_up="PAGEUP";
-  scroll_line_down="PAGEDOWN";
-  half_page_up="Ctrl+F";
-  half_page_down="Ctrl+V";
+  scroll_line_up="Ctrl+F";
+  scroll_line_down="Ctrl+V";
+  half_page_up="PAGEUP";
+  half_page_down="PAGEDOWN";
   page_bottom="Ctrl+H";
   toggle_peerlist="Ctrl+B";
   toggle_paste_mode="Ctrl+T";
+  reload_config="Ctrl+R";
 };

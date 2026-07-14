@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2021 Maxim Biro <nurupo.contributions@gmail.com>
+# Copyright (c) 2021-2022 Maxim Biro <nurupo.contributions@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@
 #
 # Run as:
 #
-#    sudo docker run -it --rm \
+#    sudo docker run -it --rm --pull=always \
 #         -v /tmp/artifact:/artifact \
 #         -v /home/jfreegman/git/toxic:/toxic \
 #         amd64/alpine:latest \
@@ -36,8 +36,19 @@
 #
 # that would use Toxic code from /home/jfreegman/git/toxic and place the build
 # artifact at /tmp/artifact.
-# You can change between amd64/alpine:latest and i386/alpine:latest, for 64-bit
-# and 32-bit builds.
+#
+# You can change between:
+#   amd64/alpine:latest,
+#   i386/alpine:latest,
+#   arm64v8/alpine:latest,
+#   arm32v7/alpine:latest,
+#   arm32v6/alpine:latest,
+#   ppc64le/alpine:latest,
+#   s390x/alpine:latest,
+#   etc.
+# as long as your system can run foreign architecture binaries, e.g. via qemu
+# static bins and binfmt (install qemu-user-static package on Debian/Ubuntu).
+#
 #
 # To debug, run:
 #
@@ -52,13 +63,6 @@ set -eu
 
 ARTIFACT_DIR="/artifact"
 TOXIC_SRC_DIR="/toxic"
-
-# Make sure we run in the expected environment
-if ! grep -q 'docker' /proc/1/cgroup
-then
-  echo "Error: This script should be run inside a disposable Docker container as it might modify system files in ways that would break a real system."
-  exit 1
-fi
 
 if [ ! -f /etc/os-release ] || ! grep -qi 'Alpine Linux' /etc/os-release
 then
@@ -83,6 +87,13 @@ set -x
 # Use all cores for building
 MAKEFLAGS=j$(nproc)
 export MAKEFLAGS
+# TODO(nurupo): Once GCC 14 comes out, switch to using the new -fhardened
+CFLAGS="-ftrivial-auto-var-init=zero -fPIE -pie -Wl,-z,relro,-z,now -fstack-protector-strong -fstack-clash-protection"
+if [ "$(uname -m)" == "x86_64" ]
+then
+  CFLAGS="$CFLAGS -fcf-protection=full"
+fi
+export CFLAGS
 
 check_sha256()
 {
@@ -131,19 +142,30 @@ mkdir -p "$BUILD_DIR"
 # Build Toxcore
 cd "$BUILD_DIR"
 
-# The git hash of the c-toxcore version we're using
-TOXCORE_VERSION="af1848ed13d2aa3a7fc218de1d0633e99814efec"
+# The git hash of the c-toxcore version we're using (v0.2.23-rc.2)
+TOXCORE_VERSION="v0.2.23"
 
 # The sha256sum of the c-toxcore tarball for TOXCORE_VERSION
-TOXCORE_HASH="acd1117b752583eb7d97aabc1053275ffa5f92591e166687a17c7267201a2e18"
+TOXCORE_HASH="b0349f4829d3d1699a77e199850f870f48d376e2baaf2c69d27b28571c498cfe"
 
 TOXCORE_FILENAME="c-toxcore-$TOXCORE_VERSION.tar.gz"
 
 wget --timeout=10 -O "$TOXCORE_FILENAME" "https://github.com/TokTok/c-toxcore/archive/$TOXCORE_VERSION.tar.gz"
 check_sha256 "$TOXCORE_HASH" "$TOXCORE_FILENAME"
+
 tar -o -xf "$TOXCORE_FILENAME"
 rm "$TOXCORE_FILENAME"
+
 cd c-toxcore*
+mkdir -p "third_party" && cd "third_party"
+
+CMP_VERSION="cc67a0eab0a7579dcb12ce1072066275d49787bf"
+CMP_FILENAME="cmp-$CMP_VERSION.tar.gz"
+wget --timeout=10 -O "$CMP_FILENAME" "https://github.com/TokTok/cmp/archive/$CMP_VERSION.tar.gz"
+tar -o -xf "$CMP_FILENAME"
+
+mv cmp-*/* 'cmp/'
+cd ..
 
 cmake -B_build -H. \
       -DENABLE_STATIC=ON \
@@ -152,6 +174,7 @@ cmake -B_build -H. \
       -DBUILD_TOXAV=OFF \
       -DBOOTSTRAP_DAEMON=OFF \
       -DDHT_BOOTSTRAP=OFF \
+      -DEXPERIMENTAL_API=ON \
       -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/prefix-toxcore"
 cmake --build _build --target install
 
@@ -164,34 +187,72 @@ cmake --build _build --target install
 # location with SSL_CERT_FILE env variable.
 cd "$BUILD_DIR"
 
-CURL_VERSION="7.80.0"
-CURL_HASH="dab997c9b08cb4a636a03f2f7f985eaba33279c1c52692430018fae4a4878dc7"
-CURL_FILENAME="curl-$CURL_VERSION.tar.gz"
+CURL_VERSION="8.21.0"
+CURL_HASH="aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6"
+CURL_FILENAME="curl-$CURL_VERSION.tar.xz"
 
 wget --timeout=10 -O "$CURL_FILENAME" "https://curl.haxx.se/download/$CURL_FILENAME"
 check_sha256 "$CURL_HASH" "$CURL_FILENAME"
-tar -xf curl*.tar.gz
-rm curl*.tar.gz
+tar -xf "$CURL_FILENAME"
+rm "$CURL_FILENAME"
 cd curl*
 
 ./configure \
   --prefix="$BUILD_DIR/prefix-curl" \
   --disable-shared \
   --enable-static \
+  --disable-ftp \
+  --disable-file \
+  --disable-ldap \
+  --disable-ldaps \
+  --disable-rtsp \
+  --disable-proxy \
+  --disable-dict \
+  --disable-telnet \
+  --disable-tftp \
+  --disable-pop3 \
+  --disable-imap \
+  --disable-smb \
+  --disable-smtp \
+  --disable-gopher \
+  --disable-mqtt \
+  --disable-docs \
+  --disable-manual \
+  --disable-libcurl-option \
+  --disable-sspi \
+  --disable-basic-auth \
+  --disable-bearer-auth \
+  --disable-digest-auth \
+  --disable-kerberos-auth \
+  --disable-negotiate-auth \
+  --disable-aws \
+  --disable-ntlm \
+  --disable-ntlm-wb \
+  --disable-tls-srp \
+  --disable-unix-sockets \
+  --disable-cookies \
+  --disable-http-auth \
+  --disable-bindlocal \
+  --disable-netrc \
+  --disable-websockets \
   --without-ca-bundle \
   --without-ca-path \
+  --without-libpsl \
   --with-ca-fallback \
   --with-nghttp2 \
   --with-brotli \
   --with-openssl
 make
 make install
-sed -i 's|-lbrotlidec |-lbrotlidec-static -lbrotlicommon-static |g' $BUILD_DIR/prefix-curl/lib/pkgconfig/libcurl.pc
+sed -i 's|-lbrotlidec |-lbrotlidec -lbrotlicommon |g' $BUILD_DIR/prefix-curl/lib/pkgconfig/libcurl.pc
+
 
 # Build Toxic
 cd "$BUILD_DIR"
 cp -a "$TOXIC_SRC_DIR" toxic
 cd toxic
+
+git config --global --add safe.directory "$PWD"
 
 if [ -z "$(git describe --tags --exact-match HEAD)" ]
 then
@@ -209,7 +270,7 @@ fi
 sed -i 's|pkg-config|pkg-config --static|' cfg/global_vars.mk
 sed -i 's|<limits.h|<linux/limits.h|' src/*
 
-CFLAGS="-static" PKG_CONFIG_PATH="$BUILD_DIR/prefix-toxcore/lib64/pkgconfig:$BUILD_DIR/prefix-toxcore/lib/pkgconfig:$BUILD_DIR/prefix-curl/lib/pkgconfig" PREFIX="$BUILD_DIR/prefix-toxic" make \
+CFLAGS="$CFLAGS -static" PKG_CONFIG_PATH="$BUILD_DIR/prefix-toxcore/lib64/pkgconfig:$BUILD_DIR/prefix-toxcore/lib/pkgconfig:$BUILD_DIR/prefix-curl/lib/pkgconfig" PREFIX="$BUILD_DIR/prefix-toxic" make \
   DISABLE_X11=1 \
   DISABLE_AV=1 \
   DISABLE_SOUND_NOTIFY=1 \
@@ -220,6 +281,7 @@ CFLAGS="-static" PKG_CONFIG_PATH="$BUILD_DIR/prefix-toxcore/lib64/pkgconfig:$BUI
   ENABLE_RELEASE=1 \
   ENABLE_ASAN=0 \
   DISABLE_GAMES=0 \
+  ENABLE_TOX_EXPERIMENTAL=1 \
   install
 
 
@@ -233,16 +295,27 @@ mv "$PREPARE_ARTIFACT_DIR/toxic.conf.example" "$PREPARE_ARTIFACT_DIR/toxic.conf"
 
 cp -aL /usr/share/terminfo "$PREPARE_ARTIFACT_DIR"
 
-echo "A minimal statically compiled Toxic.
-Doesn't support X11 integration, video/audio calls, desktop & sound
-notifications, QR codes and Python scripting.
-However, it is rather portable.
+TOXIC_GIT_TAG="$(git -C "$BUILD_DIR/toxic" describe --tags --abbrev=0 || true)"
+# GitHub PRs do shallow clones without tags
+if [ -z "$TOXIC_GIT_TAG" ]
+then
+  git -C "$BUILD_DIR/toxic" fetch origin --unshallow
+  TOXIC_GIT_TAG="$(git -C "$BUILD_DIR/toxic" describe --tags --abbrev=0)"
+fi
+TOXIC_GIT_COMMIT="$(git -C "$BUILD_DIR/toxic" rev-parse HEAD)"
+TOXIC_GIT_REV="$(git -C "$BUILD_DIR/toxic" rev-list HEAD --count)"
+TOXIC_VERSION="${TOXIC_GIT_TAG}_r${TOXIC_GIT_REV} ($TOXIC_GIT_COMMIT)"
 
-Toxic $(git -C "$BUILD_DIR/toxic" describe --tags --exact-match HEAD) ($(git -C "$BUILD_DIR/toxic" rev-parse HEAD))
+echo "A minimal statically compiled Toxic. Doesn't support X11 integration,
+video/audio calls, desktop & sound notifications, QR codes and Python
+scripting. However, it is rather portable.
 
-Build date time: $(TZ=UTC date +"%Y-%m-%dT%H:%M:%S%z")
+Toxic $TOXIC_VERSION
+
+Build date-time: $(TZ=UTC date +"%Y-%m-%dT%H:%M:%S%z")
 
 OS:
+$ cat /etc/os-release
 $(cat /etc/os-release)
 
 List of self-built software statically compiled into Toxic:
@@ -250,9 +323,11 @@ libcurl $CURL_VERSION
 libtoxcore $TOXCORE_VERSION
 
 List of OS-packaged software statically compiled into Toxic:
+$ apk list -I | grep 'static' | sort -i
 $(apk list -I | grep 'static' | sort -i)
 
 List of all packages installed during the build:
+$ apk list -I | sort -i
 $(apk list -I | sort -i)" > "$PREPARE_ARTIFACT_DIR/build_info"
 
 echo '#!/usr/bin/env sh
@@ -260,6 +335,7 @@ echo '#!/usr/bin/env sh
 DEBIAN_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 RHEL_SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
 OPENSUSE_CERT_FILE=/etc/ssl/ca-bundle.pem
+TERMUX_CERT_FILE=/data/data/com.termux/files/usr/etc/tls/cert.pem
 
 if [ ! -f "$SSL_CERT_FILE" ] ; then
   if [ -f "$DEBIAN_SSL_CERT_FILE" ] ; then
@@ -268,6 +344,8 @@ if [ ! -f "$SSL_CERT_FILE" ] ; then
     SSL_CERT_FILE="$RHEL_SSL_CERT_FILE"
   elif [ -f "$OPENSUSE_CERT_FILE" ] ; then
     SSL_CERT_FILE="$OPENSUSE_CERT_FILE"
+  elif [ -f "$TERMUX_CERT_FILE" ] ; then
+    SSL_CERT_FILE="$TERMUX_CERT_FILE"
   fi
 fi
 
@@ -301,4 +379,3 @@ mv "$PREPARE_ARTIFACT_DIR" "$PREPARE_ARTIFACT_DIR/../$ARTIFACT_NAME"
 tar -cJf "$ARTIFACT_NAME.tar.xz" "$ARTIFACT_NAME"
 mv "$ARTIFACT_NAME.tar.xz" "$ARTIFACT_DIR"
 chmod 777 -R "$ARTIFACT_DIR"
-

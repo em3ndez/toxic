@@ -1,24 +1,12 @@
 /*  bootstrap.c
  *
+ *  Copyright (C) 2016-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2016 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
+
+#include "bootstrap.h"
 
 #include <arpa/inet.h>
 #include <limits.h>
@@ -36,15 +24,12 @@
 #include "line_info.h"
 #include "misc_tools.h"
 #include "prompt.h"
+#include "run_options.h"
 #include "settings.h"
 #include "windows.h"
 
-extern struct arg_opts arg_opts;
-extern struct user_settings *user_settings;
-extern struct Winthread Winthread;
-
 /* URL that we get the JSON encoded nodes list from. */
-#define NODES_LIST_URL "https://nodes.tox.chat/json"
+#define DEFAULT_NODES_LIST_URL "https://nodes.tox.chat/json"
 
 #define DEFAULT_NODES_FILENAME "DHTnodes.json"
 
@@ -59,7 +44,6 @@ extern struct Winthread Winthread;
 
 #define IP_MAX_SIZE 45
 #define IP_MIN_SIZE 7
-#define PORT_MAX_SIZE 5
 
 #define LAST_SCAN_JSON_KEY "\"last_scan\":"
 #define LAST_SCAN_JSON_KEY_LEN (sizeof(LAST_SCAN_JSON_KEY) - 1)
@@ -81,7 +65,6 @@ extern struct Winthread Winthread;
 
 /* Maximum allowable size of the nodes list */
 #define MAX_NODELIST_SIZE (MAX_RECV_CURL_DATA_SIZE)
-
 
 static struct Thread_Data {
     pthread_t tid;
@@ -152,9 +135,9 @@ static bool node_is_offline(unsigned long long int last_ping)
  * This will be the case if the file is empty, has an invalid format,
  * or if the file is older than the given timeout.
  */
-static bool nodeslist_needs_update(const char *nodes_path)
+static bool nodeslist_needs_update(const char *nodes_path, int update_frequency)
 {
-    if (user_settings->nodeslist_update_freq <= 0) {
+    if (update_frequency <= 0) {
         return false;
     }
 
@@ -187,7 +170,7 @@ static bool nodeslist_needs_update(const char *nodes_path)
     pthread_mutex_unlock(&thread_data.lock);
 
     pthread_mutex_lock(&Winthread.lock);
-    bool is_timeout = timed_out(last_scan, user_settings->nodeslist_update_freq * 24 * 60 * 60);
+    bool is_timeout = timed_out(last_scan, update_frequency * 24 * 60 * 60);
     pthread_mutex_unlock(&Winthread.lock);
 
     if (is_timeout) {
@@ -202,7 +185,7 @@ static bool nodeslist_needs_update(const char *nodes_path)
  * Return 0 on success.
  * Return -1 on failure.
  */
-static int curl_fetch_nodes_JSON(struct Recv_Curl_Data *recv_data)
+static int curl_fetch_nodes_JSON(const Run_Options *run_opts, struct Recv_Curl_Data *recv_data)
 {
     CURL *c_handle = curl_easy_init();
 
@@ -216,21 +199,60 @@ static int curl_fetch_nodes_JSON(struct Recv_Curl_Data *recv_data)
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "charsets: utf-8");
 
-    curl_easy_setopt(c_handle, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(c_handle, CURLOPT_URL, NODES_LIST_URL);
-    curl_easy_setopt(c_handle, CURLOPT_WRITEFUNCTION, curl_cb_write_data);
-    curl_easy_setopt(c_handle, CURLOPT_WRITEDATA, recv_data);
-    curl_easy_setopt(c_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-    curl_easy_setopt(c_handle, CURLOPT_HTTPGET, 1L);
+    int ret = curl_easy_setopt(c_handle, CURLOPT_HTTPHEADER, headers);
 
-    int proxy_ret = set_curl_proxy(c_handle, arg_opts.proxy_address, arg_opts.proxy_port, arg_opts.proxy_type);
+    if (ret != CURLE_OK) {
+        fprintf(stderr, "Failed to set http headers (libcurl error %d)", ret);
+        goto on_exit;
+    }
+
+    if (!string_is_empty(run_opts->nodes_list_url)) {
+        ret = curl_easy_setopt(c_handle, CURLOPT_URL, run_opts->nodes_list_url);
+    } else {
+        ret = curl_easy_setopt(c_handle, CURLOPT_URL, DEFAULT_NODES_LIST_URL);
+    }
+
+    if (ret != CURLE_OK) {
+        fprintf(stderr, "Failed to set url (libcurl error %d)", ret);
+        goto on_exit;
+    }
+
+    ret = curl_easy_setopt(c_handle, CURLOPT_WRITEFUNCTION, curl_cb_write_data);
+
+    if (ret != CURLE_OK) {
+        fprintf(stderr, "Failed to set write function callback (libcurl error %d)", ret);
+        goto on_exit;
+    }
+
+    ret = curl_easy_setopt(c_handle, CURLOPT_WRITEDATA, recv_data);
+
+    if (ret != CURLE_OK) {
+        fprintf(stderr, "Failed to set write data (libcurl error %d)", ret);
+        goto on_exit;
+    }
+
+    ret = curl_easy_setopt(c_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+    if (ret != CURLE_OK) {
+        fprintf(stderr, "Failed to set useragent (libcurl error %d)", ret);
+        goto on_exit;
+    }
+
+    ret = curl_easy_setopt(c_handle, CURLOPT_HTTPGET, 1L);
+
+    if (ret != CURLE_OK) {
+        fprintf(stderr, "Failed to set get request (libcurl error %d)", ret);
+        goto on_exit;
+    }
+
+    int proxy_ret = set_curl_proxy(c_handle, run_opts->proxy_address, run_opts->proxy_port, run_opts->proxy_type);
 
     if (proxy_ret != 0) {
         fprintf(stderr, "set_curl_proxy() failed with error %d\n", proxy_ret);
         goto on_exit;
     }
 
-    int ret = curl_easy_setopt(c_handle, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+    ret = curl_easy_setopt(c_handle, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
 
     if (ret != CURLE_OK) {
         fprintf(stderr, "TLSv1.2 could not be set (libcurl error %d)", ret);
@@ -249,7 +271,13 @@ static int curl_fetch_nodes_JSON(struct Recv_Curl_Data *recv_data)
     if (ret != CURLE_OK) {
         /* If system doesn't support any of the specified ciphers suites, fall back to default */
         if (ret == CURLE_SSL_CIPHER) {
-            curl_easy_setopt(c_handle, CURLOPT_SSL_CIPHER_LIST, NULL);
+            ret = curl_easy_setopt(c_handle, CURLOPT_SSL_CIPHER_LIST, NULL);
+
+            if (ret != CURLE_OK) {
+                fprintf(stderr, "Failed to set SSL cipher list (libcurl error %d)\n", ret);
+                goto on_exit;
+            }
+
             ret = curl_easy_perform(c_handle);
         }
 
@@ -277,9 +305,9 @@ on_exit:
  * Return -4 if data could not be written to disk.
  * Return -5 if memory allocation fails.
  */
-static int update_DHT_nodeslist(const char *nodes_path)
+static int update_DHT_nodeslist(const Run_Options *run_opts, const char *nodes_path, int update_frequency)
 {
-    if (!nodeslist_needs_update(nodes_path)) {
+    if (!nodeslist_needs_update(nodes_path, update_frequency)) {
         return 0;
     }
 
@@ -296,7 +324,7 @@ static int update_DHT_nodeslist(const char *nodes_path)
         return -5;
     }
 
-    if (curl_fetch_nodes_JSON(recv_data) == -1) {
+    if (curl_fetch_nodes_JSON(run_opts, recv_data) == -1) {
         free(recv_data);
         fclose(fp);
         return -2;
@@ -320,13 +348,13 @@ static int update_DHT_nodeslist(const char *nodes_path)
     return 1;
 }
 
-static void get_nodeslist_path(char *buf, size_t buf_size)
+static void get_nodeslist_path(const Run_Options *run_opts, const Paths *paths, char *buf, size_t buf_size)
 {
     char *config_dir = NULL;
 
-    if (arg_opts.nodes_path[0]) {
-        snprintf(buf, buf_size, "%s", arg_opts.nodes_path);
-    } else if ((config_dir = get_user_config_dir()) != NULL) {
+    if (!string_is_empty(run_opts->nodes_path)) {
+        snprintf(buf, buf_size, "%s", run_opts->nodes_path);
+    } else if ((config_dir = get_user_config_dir(paths)) != NULL) {
         snprintf(buf, buf_size, "%s%s%s", config_dir, CONFIGDIR, DEFAULT_NODES_FILENAME);
         free(config_dir);
     } else {
@@ -474,12 +502,17 @@ static int extract_node(const char *line, struct Node *node)
 }
 
 /* Loads the DHT nodeslist to memory from json encoded nodes file. */
-void *load_nodeslist_thread(void *data)
+static void *load_nodeslist_thread(void *data)
 {
-    UNUSED_VAR(data);
 
-    char nodes_path[PATH_MAX];
-    get_nodeslist_path(nodes_path, sizeof(nodes_path));
+    const Toxic *toxic = (Toxic *) data;
+
+    if (toxic == NULL) {
+        goto on_exit;
+    }
+
+    char nodes_path[TOXIC_MAX_PATH_LENGTH];
+    get_nodeslist_path(toxic->run_opts, toxic->paths, nodes_path, sizeof(nodes_path));
 
     FILE *fp = NULL;
 
@@ -493,7 +526,9 @@ void *load_nodeslist_thread(void *data)
         goto on_exit;
     }
 
-    int update_err = update_DHT_nodeslist(nodes_path);
+    const Client_Config *c_config = toxic->c_config;
+
+    const int update_err = update_DHT_nodeslist(toxic->run_opts, nodes_path, c_config->nodeslist_update_freq);
 
     if (update_err < 0) {
         fprintf(stderr, "update_DHT_nodeslist() failed with error %d\n", update_err);
@@ -526,10 +561,14 @@ void *load_nodeslist_thread(void *data)
         pthread_mutex_unlock(&thread_data.lock);
     }
 
+    pthread_mutex_lock(&thread_data.lock);
+    const size_t num_nodes = Nodes.count;
+    pthread_mutex_unlock(&thread_data.lock);
+
     /* If nodeslist does not contain any valid entries we set the last_scan value
      * to 0 so that it will fetch a new list the next time this function is called.
      */
-    if (Nodes.count == 0) {
+    if (num_nodes == 0) {
         const char *s = "{\"last_scan\":0}";
         rewind(fp);
         fwrite(s, strlen(s), 1, fp);  // Not much we can do if it fails
@@ -543,7 +582,7 @@ void *load_nodeslist_thread(void *data)
 on_exit:
     thread_data.active = false;
     pthread_attr_destroy(&thread_data.attr);
-    pthread_exit(0);
+    pthread_exit(NULL);
 }
 
 /* Creates a new thread that will load the DHT nodeslist to memory
@@ -557,7 +596,7 @@ on_exit:
  * Return -4 if pthread fails to set detached state.
  * Return -5 if thread creation fails.
  */
-int load_DHT_nodeslist(void)
+int load_DHT_nodeslist(Toxic *toxic)
 {
     if (thread_data.active) {
         return -1;
@@ -577,7 +616,7 @@ int load_DHT_nodeslist(void)
 
     thread_data.active = true;
 
-    if (pthread_create(&thread_data.tid, &thread_data.attr, load_nodeslist_thread, NULL) != 0) {
+    if (pthread_create(&thread_data.tid, &thread_data.attr, load_nodeslist_thread, (void *) toxic) != 0) {
         thread_data.active = false;
         return -5;
     }
@@ -586,7 +625,7 @@ int load_DHT_nodeslist(void)
 }
 
 /* Connects to NUM_BOOTSTRAP_NODES random DHT nodes listed in the DHTnodes file. */
-static void DHT_bootstrap(Tox *m)
+static void DHT_bootstrap(Tox *tox)
 {
     pthread_mutex_lock(&thread_data.lock);
     size_t num_nodes = Nodes.count;
@@ -596,12 +635,12 @@ static void DHT_bootstrap(Tox *m)
         return;
     }
 
-    size_t i;
-
     pthread_mutex_lock(&thread_data.lock);
 
-    for (i = 0; i < NUM_BOOTSTRAP_NODES; ++i) {
-        struct Node *node = &Nodes.list[rand() % Nodes.count];
+    for (size_t i = 0; i < NUM_BOOTSTRAP_NODES; ++i) {
+        const unsigned int idx = rand_range_not_secure(Nodes.count);
+        struct Node *node = &Nodes.list[idx];
+
         const char *addr = node->have_ip4 ? node->ip4 : node->ip6;
 
         if (!addr) {
@@ -609,13 +648,13 @@ static void DHT_bootstrap(Tox *m)
         }
 
         Tox_Err_Bootstrap err;
-        tox_bootstrap(m, addr, node->port, (uint8_t *) node->key, &err);
+        tox_bootstrap(tox, addr, node->port, (uint8_t *) node->key, &err);
 
         if (err != TOX_ERR_BOOTSTRAP_OK) {
             fprintf(stderr, "Failed to bootstrap %s:%d\n", addr, node->port);
         }
 
-        tox_add_tcp_relay(m, addr, node->port, (uint8_t *) node->key, &err);
+        tox_add_tcp_relay(tox, addr, node->port, (uint8_t *) node->key, &err);
 
         if (err != TOX_ERR_BOOTSTRAP_OK) {
             fprintf(stderr, "Failed to add TCP relay %s:%d\n", addr, node->port);
@@ -626,13 +665,16 @@ static void DHT_bootstrap(Tox *m)
 }
 
 /* Manages connection to the Tox DHT network. */
-void do_tox_connection(Tox *m)
+void do_tox_connection(Toxic *toxic)
 {
-    static time_t last_bootstrap_time = 0;
-    bool connected = prompt_selfConnectionStatus() != TOX_CONNECTION_NONE;
+    if (toxic == NULL) {
+        return;
+    }
 
-    if (!connected && timed_out(last_bootstrap_time, TRY_BOOTSTRAP_INTERVAL)) {
-        DHT_bootstrap(m);
-        last_bootstrap_time = get_unix_time();
+    const bool connected = prompt_selfConnectionStatus(toxic) != TOX_CONNECTION_NONE;
+
+    if (!connected && timed_out(toxic->last_bootstrap_time, TRY_BOOTSTRAP_INTERVAL)) {
+        DHT_bootstrap(toxic->tox);
+        toxic->last_bootstrap_time = get_unix_time();
     }
 }

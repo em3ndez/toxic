@@ -19,22 +19,11 @@
 | [OpenAL](http://openal.org)                          | AUDIO, SOUND NOTIFICATIONS | libopenal-dev       |
 | [OpenALUT](http://openal.org)                        | SOUND NOTIFICATIONS        | libalut-dev         |
 | [LibNotify](https://developer.gnome.org/libnotify)   | DESKTOP NOTIFICATIONS      | libnotify-dev       |
+| [X11](https://gitlab.freedesktop.org/xorg/lib/libx11)| VIDEO, DESKTOP FOCUS       | libx11-dev          |
 | [Python 3](http://www.python.org/)                   | PYTHON                     | python3-dev         |
 | [AsciiDoc](http://asciidoc.org/index.html)           | DOCUMENTATION<sup>1</sup>  | asciidoc            |
 
 <sup>1</sup>: see [Documentation](#documentation)
-
-#### OS X Notes
-Using [Homebrew](http://brew.sh):
-```
-brew install curl qrencode openal-soft freealut libconfig libpng
-brew install --HEAD https://raw.githubusercontent.com/Tox/homebrew-tox/master/Formula/libtoxcore.rb
-brew install libnotify
-export PKG_CONFIG_PATH=/usr/local/opt/openal-soft/lib/pkgconfig
-make
-```
-
-You can omit `libnotify` if you intend to build without desktop notifications enabled.
 
 ## Compiling
 ```
@@ -47,12 +36,33 @@ Run `make doc` in the build directory after editing the asciidoc files to regene
 **Note for developers**: asciidoc files and generated manpages will need to be committed together.<br />
 **Note for everyone**: [asciidoc](http://asciidoc.org/index.html) (and this step) is only required for regenerating manpages when you modify them.
 
+#### OS X Notes
+Using [Homebrew](http://brew.sh):
+```
+brew install curl qrencode openal-soft freealut libconfig libpng
+brew install --HEAD https://raw.githubusercontent.com/Tox/homebrew-tox/master/Formula/libtoxcore.rb
+brew install libnotify
+export PKG_CONFIG_PATH=/usr/local/opt/openal-soft/lib/pkgconfig
+make
+```
+
+#### FreeBSD Notes
+To compile Toxic on FreeBSD you'll need to use `gmake` instead of `make`, and you may need to manually tell `pkg-config` where to find the toxcore library.
+In order to build with audio/video support you'll need to install the [v4l_compat](https://www.freshports.org/multimedia/v4l_compat) port.
+
+The following commands should work for a default installation of both toxcore and toxic:
+```
+export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig
+gmake
+sudo -E gmake install
+```
+
 ## Notes
 
 #### Compilation variables
 * You can add specific flags to the Makefile with `USER_CFLAGS=""` and `USER_LDFLAGS=""` passed as arguments to make, or as environment variables
 * Default compile options can be overridden by using special variables:
-  * `DISABLE_X11=1` → Disable X11 support (needed for focus tracking)
+  * `DISABLE_X11=1` → Disable X11 support (needed for video and window focus tracking)
   * `DISABLE_AV=1` → Disable audio call support
   * `DISABLE_SOUND_NOTIFY=1` → Disable sound notifications support
   * `DISABLE_QRCODE=1` → Disable QR exporting support
@@ -61,7 +71,8 @@ Run `make doc` in the build directory after editing the asciidoc files to regene
   * `DISABLE_GAMES=1` → Disable support for games
   * `ENABLE_PYTHON=1` → Build toxic with Python scripting support
   * `ENABLE_RELEASE=1` → Build toxic without debug symbols and with full compiler optimizations
-  * `ENABLE_ASAN=1` → Build toxic with LLVM Address Sanitizer enabled
+  * `ENABLE_ASAN=1` → Build toxic with LLVM Address Sanitizer enabled (reduces performance but increases security)
+  * `ENABLE_TOX_EXPERIMENTAL=1` → Build with support for Tox's experimental API functionality
 
 * `DESTDIR=""` Specifies the base install directory for binaries and data files (e.g.: DESTDIR="/tmp/build/pkg")
 

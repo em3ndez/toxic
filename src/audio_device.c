@@ -1,7 +1,7 @@
 /*  audio_device.c
  *
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
+ *  Copyright (C) 2026 Toxic All Rights Reserved.
  *
  *  This file is part of Toxic.
  *
@@ -33,7 +33,6 @@
 #include <AL/alext.h>
 #endif /* ALC_ALL_DEVICES_SPECIFIER */
 
-#include <assert.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -41,7 +40,6 @@
 #include <string.h>
 #include <unistd.h>
 
-extern struct user_settings *user_settings;
 extern struct Winthread Winthread;
 
 typedef struct FrameInfo {
@@ -173,9 +171,7 @@ DeviceError terminate_devices(void)
             return de_InternalError;
         }
 
-        if (audio_state->current_al_device_name[type] != NULL) {
-            free(audio_state->current_al_device_name[type]);
-        }
+        free(audio_state->current_al_device_name[type]);
     }
 
     free(audio_state);
@@ -202,7 +198,7 @@ void get_al_device_names(void)
 
         if (stringed_device_list != NULL) {
             audio_state->default_al_device_name[type] = alcGetString(NULL,
-                    type == input ? ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER : ALC_DEFAULT_DEVICE_SPECIFIER);
+                type == input ? ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER : ALC_DEFAULT_DEVICE_SPECIFIER);
 
             for (; *stringed_device_list != '\0'
                     && audio_state->num_al_devices[type] < MAX_OPENAL_DEVICES; ++audio_state->num_al_devices[type]) {
@@ -343,7 +339,7 @@ static DeviceError open_al_device(DeviceType type, FrameInfo frame_info)
 {
     audio_state->al_device[type] = type == input
                                    ? alcCaptureOpenDevice(audio_state->current_al_device_name[type],
-                                           frame_info.sample_rate, sound_mode(frame_info.stereo), frame_info.samples_per_frame * 2)
+                                       frame_info.sample_rate, sound_mode(frame_info.stereo), frame_info.samples_per_frame * 2)
                                    : alcOpenDevice(audio_state->current_al_device_name[type]);
 
     if (audio_state->al_device[type] == NULL) {
@@ -433,9 +429,7 @@ DeviceError set_al_device(DeviceType type, int32_t selection)
 
     char **cur_name = &audio_state->current_al_device_name[type];
 
-    if (*cur_name != NULL) {
-        free(*cur_name);
-    }
+    free(*cur_name);
 
     *cur_name = malloc(strlen(name) + 1);
 
@@ -485,7 +479,7 @@ DeviceError set_al_device(DeviceType type, int32_t selection)
 }
 
 static DeviceError open_device(DeviceType type, uint32_t *device_idx, DataHandleCallback cb, void *cb_data,
-                               uint32_t sample_rate, uint32_t frame_duration, uint8_t channels)
+                               uint32_t sample_rate, uint32_t frame_duration, uint8_t channels, double VAD_threshold)
 {
     if (channels != 1 && channels != 2) {
         return de_UnsupportedMode;
@@ -530,8 +524,8 @@ static DeviceError open_device(DeviceType type, uint32_t *device_idx, DataHandle
         device->cb_data = cb_data;
 #ifdef AUDIO
 
-        if (user_settings->VAD_threshold >= 0.0) {
-            device->VAD_threshold = user_settings->VAD_threshold;
+        if (VAD_threshold >= 0.0) {
+            device->VAD_threshold = VAD_threshold;
         }
 
 #else
@@ -551,14 +545,15 @@ static DeviceError open_device(DeviceType type, uint32_t *device_idx, DataHandle
 }
 
 DeviceError open_input_device(uint32_t *device_idx, DataHandleCallback cb, void *cb_data, uint32_t sample_rate,
-                              uint32_t frame_duration, uint8_t channels)
+                              uint32_t frame_duration, uint8_t channels, double VAD_threshold)
 {
-    return open_device(input, device_idx, cb, cb_data, sample_rate, frame_duration, channels);
+    return open_device(input, device_idx, cb, cb_data, sample_rate, frame_duration, channels, VAD_threshold);
 }
 
-DeviceError open_output_device(uint32_t *device_idx, uint32_t sample_rate, uint32_t frame_duration, uint8_t channels)
+DeviceError open_output_device(uint32_t *device_idx, uint32_t sample_rate, uint32_t frame_duration, uint8_t channels,
+                               double VAD_threshold)
 {
-    return open_device(output, device_idx, 0, 0, sample_rate, frame_duration, channels);
+    return open_device(output, device_idx, 0, 0, sample_rate, frame_duration, channels, VAD_threshold);
 }
 
 DeviceError close_device(DeviceType type, uint32_t device_idx)
@@ -662,7 +657,7 @@ DeviceError write_out(uint32_t device_idx, const int16_t *data, uint32_t sample_
  *
  * return normalized volume of buffer in range 0.0-100.0
  */
-float volume(int16_t *frame, uint32_t samples)
+static float volume(int16_t *frame, uint32_t samples)
 {
     float sum_of_squares = 0;
 
@@ -692,7 +687,7 @@ static void *poll_input(void *arg)
     int16_t *frame_buf = malloc(FRAME_BUF_SIZE * sizeof(int16_t));
 
     if (frame_buf == NULL) {
-        exit_toxic_err("failed in thread_poll", FATALERR_MEMORY);
+        exit_toxic_err(FATALERR_MEMORY, "failed in thread_poll");
     }
 
     while (1) {
@@ -755,6 +750,7 @@ static void *poll_input(void *arg)
 
     pthread_exit(NULL);
 }
+
 #endif
 
 float get_input_volume(void)
@@ -770,10 +766,10 @@ float get_input_volume(void)
     return ret;
 }
 
-void print_al_devices(ToxWindow *self, DeviceType type)
+void print_al_devices(ToxWindow *self, const Client_Config *c_config, DeviceType type)
 {
     for (int i = 0; i < audio_state->num_al_devices[type]; ++i) {
-        line_info_add(self, false, NULL, NULL, SYS_MSG,
+        line_info_add(self, c_config, false, NULL, NULL, SYS_MSG,
                       audio_state->current_al_device_name[type]
                       && strcmp(audio_state->current_al_device_name[type], audio_state->al_device_names[type][i]) == 0 ? 1 : 0,
                       0, "%d: %s", i, audio_state->al_device_names[type][i]);

@@ -1,23 +1,9 @@
 /*  message_queue.h
  *
+ *  Copyright (C) 2014-2026 Toxic All Rights Reserved.
  *
- *  Copyright (C) 2014 Toxic All Rights Reserved.
- *
- *  This file is part of Toxic.
- *
- *  Toxic is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  Toxic is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Toxic.  If not, see <http://www.gnu.org/licenses/>.
- *
+ *  This file is part of Toxic. Toxic is free software licensed
+ *  under the GNU General Public License 3.0.
  */
 
 #ifndef MESSAGE_QUEUE_H
@@ -48,7 +34,7 @@ void cqueue_add(struct chat_queue *q, const char *msg, size_t len, uint8_t type,
  * Tries to send all messages in the send queue in sequential order.
  * If a message fails to send the function will immediately return.
  */
-void cqueue_try_send(ToxWindow *self, Tox *m);
+void cqueue_try_send(ToxWindow *self, Tox *tox);
 
 /*
  * Sets the noread flag for messages sent to the peer associated with `self` which have not
@@ -57,6 +43,6 @@ void cqueue_try_send(ToxWindow *self, Tox *m);
 void cqueue_check_unread(ToxWindow *self);
 
 /* removes message with matching receipt from queue, writes to log and updates line to show the message was received. */
-void cqueue_remove(ToxWindow *self, Tox *m, uint32_t receipt);
+void cqueue_remove(ToxWindow *self, Toxic *toxic, uint32_t receipt);
 
 #endif /* MESSAGE_QUEUE_H */
